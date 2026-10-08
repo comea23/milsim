@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "milsim"
+version = "0.0.1"
+description = "任务级军事仿真器（引擎 / 基础服务 / 模型）"
+requires-python = ">=3.11"
+# numpy 是必需依赖：EntityStore 的位置/姿态用结构数组存，实体的 ID 直接当
+# 数组下标，这样"全场实体推进一帧"能写成一次向量运算（§6.3 的数据并行）。
+# 改用 dict 的话这块优化无从谈起。
+dependencies = ["numpy>=1.26"]
+
+[project.optional-dependencies]
+# 全球层（H3）才需要 h3。引擎层与决策层刻意保持零依赖。
+map = ["h3>=4.0"]
+# 卫星底图（§5.16.11 / §5.16.18）：tools/serve_replay.py 的 /tiles 要把
+# AFSIM 自带的 plate-carrée mbtiles 重投影成 Web 墨卡托瓦片，用 Pillow 做
+# 重采样。没装只是没有底图（覆盖物照常画），**不影响推流**，所以是可选的。
+satmap = ["Pillow>=10"]
+dev = ["pytest>=8.0", "pyflakes>=3.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-q"

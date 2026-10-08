@@ -1,0 +1,210 @@
+# ****************************************************************************
+# aircraft_mover_demo 的**可运行版**参照脚本
+#
+# 来源：demos/mover_demo/aircraft_mover_demo.txt（AFSIM 2.9.0-v1.0 汉化版）。
+# 那份原稿**在 AFSIM 2.9.0 上跑不起来**，不是参数写法问题，是它用了这个版本
+# 根本没有的语法。逐条实测出来的（tools/afsim_ref.py 会把它们摘掉才能跑）：
+#
+#   1. 顶层 `simulation / duration / time_step / end_simulation`
+#        ***** ERROR: Unknown command: simulation
+#   2. platform_type 里的 `name "..."`（型号不叫名字）
+#        ***** ERROR: Unknown command: name
+#   3. `platform <名>` + 块内 `platform_type <型号>` 两步写法
+#        ***** ERROR: Could not find platform_type platform_type
+#      AFSIM 里平台名与型号是同一行的两个 token：`platform <名> <型号>`。
+#   4. 旋翼机那块的 `mode HOVER/CRUISE/DASH`
+#        ***** ERROR: 'mode' cannot be used in this context
+#
+# 所以这份参照是**按原稿的航线与参数重新写的合法脚本**：航线坐标、高度、
+# 每段速度、航向、初始高度全部逐字照抄原稿，只把"表达方式"换成 AFSIM 认的。
+# 原本想改的只有写法，没有改过任何一个数字——改过就失去参照的意义了。
+#
+# 与项目的对照见 demos/afsim_mover/README.md。
+# ****************************************************************************
+
+end_time 600 sec
+
+# ============================================================================
+# 平台类型：WSF_AIR_MOVER（原稿 DEMO_AIR_MOVER_WSF_AIR_MOVER 的参数，逐条照抄）
+# ============================================================================
+platform_type DEMO_AIR_MOVER WSF_PLATFORM
+   icon f-18
+   side blue
+   spatial_domain air
+
+   mover WSF_AIR_MOVER
+      # ---- Mover 基础 ----
+      # 原稿写 1.0 sec。这里用 0.1 sec：**对照两边的采样粒度必须一样**，
+      # 否则量出来的"转弯快慢"里混着采样间隔的差别（我方复现也想比动力学，
+      # 不想比谁采得稀）。
+      update_interval 0.1 sec
+      update_time_tolerance 0.01 sec
+
+      # ---- Route Mover Commands ----
+      altitude_offset 0 ft
+      at_end_of_path extrapolate
+      on_turn_failure best_effort
+      start_at wp1
+      start_time 0 sec
+      switch_on_approach
+      turn_failure_threshold 0.01
+
+      # ---- 速度 ----
+      maximum_speed 900 mph
+      minimum_speed 200 mph
+
+      # ---- 高度 ----
+      maximum_altitude 45000 ft
+      minimum_altitude 1000 ft
+      maximum_climb_rate 3000 ft/min
+      maximum_flight_path_angle 15 deg
+
+      # ---- 加速 / 过载 ----
+      maximum_linear_acceleration 5 g
+      maximum_radial_acceleration 4 g
+
+      # ---- 姿态限制 ----
+      bank_angle_limit 30 deg
+      body_g_limit 7 g
+      roll_rate_limit 20 deg/sec
+
+      # ---- 航路跟踪 ----
+      heading_pursuit_gain 5
+      path_variance_radius 0 ft
+      speed_variance_percent 0
+      turn_rate_limit 360 deg/min
+      path_compute_timestep 0.5 sec
+   end_mover
+end_platform_type
+
+# ============================================================================
+# 平台类型：WSF_KINEMATIC_MOVER（原稿 DEMO_AIR_MOVER_WSF_KINEMATIC 的参数）
+# ============================================================================
+platform_type DEMO_KINEMATIC WSF_PLATFORM
+   icon f-15
+   side blue
+   spatial_domain air
+
+   mover WSF_KINEMATIC_MOVER
+      update_interval 0.1 sec
+      update_time_tolerance 0.01 sec
+
+      prefer_canopy_up true
+      target_speed 600 mph
+      initial_speed 400 mph
+      initial_flight_path_angle 0 deg
+
+      maximum_linear_acceleration 3 g
+      maximum_radial_acceleration 6 g
+
+      maximum_body_roll_rate 180 deg/sec
+      maximum_body_turn_rate 45 deg/sec
+
+      velocity_pursuit_gain 4.0
+      proportional_navigation_gain 40.0
+   end_mover
+end_platform_type
+
+# ============================================================================
+# 五个机动科目：航线逐字照抄原稿
+# ============================================================================
+
+# 1. 最大速度
+platform AIR_MOVER_MAX_SPEED DEMO_AIR_MOVER
+   position 33:54:44.51n 83:20:16.78w altitude 10000 ft
+   heading 90 deg
+   route
+      label wp1
+      position 33:54:44.51n 83:20:16.78w altitude 10000 ft speed 200 mph
+      position 33:58:00.00n 83:15:00.00w altitude 10000 ft speed 900 mph
+      position 34:00:00.00n 83:10:00.00w altitude 10000 ft speed 900 mph
+      go_to wp1
+   end_route
+end_platform
+
+# 2. 最大爬升率
+platform AIR_MOVER_MAX_CLIMB DEMO_AIR_MOVER
+   position 33:54:44.51n 83:20:16.78w altitude 2000 ft
+   heading 270 deg
+   route
+      label start
+      position 33:54:44.51n 83:20:16.78w altitude 2000 ft speed 300 mph
+      position 34:00:00.00n 83:20:00.00w altitude 45000 ft speed 500 mph
+      position 34:05:00.00n 83:20:00.00w altitude 45000 ft speed 500 mph
+      go_to start
+   end_route
+end_platform
+
+# 3. 最大转弯率（方形四边）
+platform AIR_MOVER_MAX_TURN DEMO_AIR_MOVER
+   position 33:54:44.51n 83:20:16.78w altitude 20000 ft
+   heading 0 deg
+   route
+      label turn_start
+      position 33:54:44.51n 83:20:16.78w altitude 20000 ft speed 600 mph
+      position 34:00:00.00n 83:25:00.00w altitude 20000 ft speed 600 mph
+      position 34:05:00.00n 83:20:00.00w altitude 20000 ft speed 600 mph
+      position 34:00:00.00n 83:15:00.00w altitude 20000 ft speed 600 mph
+      go_to turn_start
+   end_route
+end_platform
+
+# 4. 最大过载（窄四边形）
+platform AIR_MOVER_MAX_G DEMO_AIR_MOVER
+   position 33:54:44.51n 83:20:16.78w altitude 15000 ft
+   heading 180 deg
+   route
+      label g_start
+      position 33:54:44.51n 83:20:16.78w altitude 15000 ft speed 700 mph
+      position 34:02:00.00n 83:20:00.00w altitude 15000 ft speed 700 mph
+      position 34:00:00.00n 83:25:00.00w altitude 15000 ft speed 700 mph
+      position 33:55:00.00n 83:22:00.00w altitude 15000 ft speed 700 mph
+      go_to g_start
+   end_route
+end_platform
+
+# 5. 俯冲
+platform AIR_MOVER_DIVE DEMO_AIR_MOVER
+   position 33:54:44.51n 83:20:16.78w altitude 40000 ft
+   heading 90 deg
+   route
+      label dive_start
+      position 33:54:44.51n 83:20:16.78w altitude 40000 ft speed 500 mph
+      position 34:00:00.00n 83:10:00.00w altitude 3000 ft speed 400 mph
+      position 34:02:00.00n 83:15:00.00w altitude 1000 ft speed 200 mph
+      position 34:00:00.00n 83:20:00.00w altitude 1000 ft speed 200 mph
+      position 33:54:44.51n 83:20:16.78w altitude 1000 ft speed 200 mph
+      go_to dive_start
+   end_route
+end_platform
+
+# ============================================================================
+# 两个运动学科目（原稿 KINEMATIC_ROUTE_SMOOTH / KINEMATIC_ROUTE_DIVE）
+# ============================================================================
+
+# 6. 平滑机动：爬升到 30000 ft 再降到 5000 ft，看垂向过渡是不是连续的
+platform KINEMATIC_SMOOTH DEMO_KINEMATIC
+   position 34:00:00.00n 83:00:00.00w altitude 10000 ft
+   heading 270 deg
+   route
+      label smooth_start
+      position 34:00:00.00n 83:00:00.00w altitude 10000 ft speed 400 mph
+      position 34:05:00.00n 83:10:00.00w altitude 30000 ft speed 500 mph
+      position 34:10:00.00n 83:05:00.00w altitude 15000 ft speed 600 mph
+      position 34:05:00.00n 83:00:00.00w altitude 5000 ft speed 400 mph
+      go_to smooth_start
+   end_route
+end_platform
+
+# 7. 大角度俯冲后拉起
+platform KINEMATIC_DIVE DEMO_KINEMATIC
+   position 34:00:00.00n 83:00:00.00w altitude 35000 ft
+   heading 90 deg
+   route
+      label dive_start
+      position 34:00:00.00n 83:00:00.00w altitude 35000 ft speed 600 mph
+      position 34:10:00.00n 82:50:00.00w altitude 2000 ft speed 400 mph
+      position 34:05:00.00n 82:55:00.00w altitude 35000 ft speed 500 mph
+      go_to dive_start
+   end_route
+end_platform

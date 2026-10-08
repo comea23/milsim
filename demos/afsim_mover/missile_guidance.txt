@@ -1,0 +1,147 @@
+# =============================================================================
+# AFSIM `demos/new_guidance/new_guidance3.txt` 的弹体侧复现（§5.11）
+#
+# 原 demo 是什么：蓝方战斗机在 39.5N/89.3W、25000 ft、450 kts 上，对着一条
+# **预装订航迹**把一枚 `blue_asm_missile`（`WSF_GUIDED_MOVER` +
+# `WSF_GUIDANCE_COMPUTER`）打出去，目标是 38.6N/90.3W 的静止目标。
+#
+# 与 kinematic / aircraft / 3d_route_finder 那三份的**根本差别**：那三份比的是
+# 机动件与选路，这一份比的是**弹体 + 制导件**（§5.8 的两个部件）。
+#
+# ── 同一组弹体参数（逐个从原脚本抄过来，出处见注释）────────────────────────
+#
+#   原脚本（weapons/agm/blue_asm_missile.txt）        本文件
+#   ----------------------------------------------------------------
+#   initial_mass        519 kg                    mass 519 kg
+#   fuel_mass           200 kg                    fuel_mass 200 kg
+#   thrust              2900 Nt                   thrust 2900 N
+#   thrust_duration     1000 sec                  → 折成 specific_impulse
+#   aero reference_area 0.092347 m2 \             drag_area 0.00923 m2
+#   aero cd_zero_subsonic 0.10      /             （= Cd·A）
+#   commanded_speed     537 mph = 240 m/s         （阶段表里，见下）
+#   commanded_altitude  75 m                      （阶段表里，见下）
+#   weapon_effects radius_and_pk 100 m 0.7        lethal_radius 100 m
+#
+# ── ★ 两处**必须换算**的常量（不换算就会静默跑出另一枚弹）─────────────────
+#
+# 一、燃料模型的口径不同。AFSIM 的 `WSF_GUIDED_MOVER` 按
+#     **`fuel_mass ÷ thrust_duration`** 定**满推力质量流率**（200 kg ÷ 1000 s
+#     = 0.20 kg/s）；本项目的弹体按 **`thrust ÷ (Isp·g)`** 烧
+#     （`mover/missile.py` 的 `_step`）。两者要对上就得把 AFSIM 那两个数折成
+#     等效比冲：
+#
+#         Isp = thrust ÷ (流率 × g) = 2900 N ÷ (0.20 kg/s × 9.80665) = 1478 s
+#
+#     **原脚本那一行 `#specific_impulse 300 sec` 是被注释掉的**——真值来自
+#     `thrust_duration`。照抄 300 s 会让燃烧率差 4.9 倍，而两者都是"合理的数"。
+#
+# 二、阻力口径不同。AFSIM 用**气动表** `aero WSF_AERO`：`cd_zero_subsonic
+#     0.10` 配 `reference_area 0.092347 m²`，而且在 `mach_begin_cd_rise 0.95`
+#     之后升到 `cd_zero_supersonic 0.25`。本项目只有**常数** `drag_area`，
+#     没有马赫数、没有气动表——这是 §5.8 明确记下的已知限制。这里取
+#     **亚音速那一档** `0.10 × 0.092347 = 0.00923 m²`，于是本复现只在
+#     **亚音速段**可比，跨音速段的差距是模型缺口而不是参数错。
+#
+# ── 阶段表：照抄过来了（v0.13.22）─────────────────────────────────────────
+#
+# 原脚本那三段（CRUISE 贴地 75 m / POPUP 爬 6000 m / DIVE 比例导引）现在就是
+# `ASM_GUIDANCE` 的默认表（`models/guidance/asm.py`），这里直接写组件名即可。
+#
+# 补它需要两样东西，都已落地：
+#   · `target_elevation` 这个推进条件（`POPUP → DIVE` 的判据，见下面第 4 条）；
+#   · 一个能拉 4.6 g 的弹体（见下面"过载上限"那一节）。
+#
+# ── 仍然复现不了的（结构性；完整读法在 README §11.4，条目在设计文档 §9-31~35）──
+#
+# 1. **预规划航路**（§9-31，**仍缺**）：原脚本的 CRUISE 段写着
+#    `allow_route_following true`，实测弹**先走完 `route` 里那两个航路点
+#    （39.0N/89.5W → 38.8N/89.5W）、再转向目标**（t = 217.1 到航路点 1、
+#    t = 309.6 走完航路）。本项目的 `MissileMover` **显式拒绝**按点/按格
+#    下达目的地（`move_to_point` 抛 `ConfigurationError`），所以这里只能
+#    **直扑目标**——横向那一路本来就不一样。
+# 2. `maximum_pitch_angle 50 deg` 没有对应物（§9-35，**仍缺**；本项目不夹
+#    俯仰角，它与机动件那条"航迹角上限"§9-28 是同一个量）。
+# 3. **阶段表仍然写不进想定**（§9-32，**仍缺**）：`Params.phases` 是类默认
+#    值。"换一种弹 = 换一张表"现在靠换**组件名**（`ASM_GUIDANCE` /
+#    `CRUISE_GUIDANCE` / `BALLISTIC_GUIDANCE`），想定作者还改不了表里的值。
+# 4. ~~`target_elevation` 这个推进条件没有~~ —— **v0.13.22 补上**（§9-33）。
+#    原脚本 `POPUP` 段写 `next_phase DIVE when target_elevation < -20 deg`，
+#    意思是"跃升到**目标**掉到视线下方 20°"。它**不是** `descending`
+#    （"**自己**在下降"）：跃升那整段弹都在爬升，那个事件一帧都不成立。
+#
+# ── 弹体的过载上限 45 m/s²：从参照倒推的，不是随手给的 ─────────────────────
+#
+# 参照那枚弹在 POPUP 段用 6 s 把弹道倾角从 0 抬到 67.6°（t = 604.1 → 610.1，
+# 速率 240 → 178 m/s），折合 a = v·ω ≈ 240 × 1.179/6 ≈ 47 m/s² ≈ 4.8 g。
+# 实测扫过一遍同一张表：`radial_accel` 取 12 / 30 m/s² 时弹只抬头到 15°、
+# 在目标**头顶 750 m** 掠过（不命中）；**45 起命中**（最近通过 28.8 m）。
+# 所以这一行是照着参照的机动能力定的——**表与弹体是配套的**。
+#
+# 所以这份复现**不是**原 demo 的等价物：它把"同一枚弹体 + 同一张阶段表"
+# 拿出来跑，回答的是"**给定同一组质量/推力/阻力/阶段表，本项目与 AFSIM 的
+# 纵向弹道差多少**"；横向（航路）那一路仍然对不上。
+# =============================================================================
+
+component_type MISSILE_MOVER
+end_component_type
+
+# 制导件：跃升俯冲那张表（`models/guidance/asm.py`，注册名 ASM_GUIDANCE）。
+# 它自带 CRUISE（贴地 75 m / 240 m/s，斜距 3 km 交班）→ POPUP（爬 6000 m，
+# 目标掉到视线下方 20° 交班）→ DIVE（比例导引俯冲）三段。
+component_type ASM_GUIDANCE
+end_component_type
+
+# 弹体：参数逐个来自 `weapons/agm/blue_asm_missile.txt` 的 `stage 1`。
+component_type ASM_BODY : MISSILE_MOVER
+    mass              519 kg
+    fuel_mass         200 kg
+    thrust           2900 N
+    # = 2900 N ÷ (200 kg ÷ 1000 s × g)。见上面"★ 一"。
+    specific_impulse 1478 s
+    # = cd_zero_subsonic 0.10 × reference_area 0.092347 m²。见上面"★ 二"。
+    drag_area        0.00923 m2
+    # 原脚本没有写机动过载上限（它靠气动表的 cl_max 与动压算）。这个数是从
+    # 参照的机动能力**倒推**出来的：它在 POPUP 段 6 s 抬头 67.6° ≈ 4.8 g。
+    # 取 30（3.1 g）时弹只抬到 15°、从目标头顶 750 m 掠过——那正是本项目
+    # 旧版跑出来"峰值过载 3.06 g / 上限 3.1 g"的原因：**一直在顶着上限飞**。
+    radial_accel       45 m/s2
+    max_speed         600 m/s
+    # 载机投放：450 kts = 231.5 m/s（实测参照第一个样本就是这个数）。
+    launch_speed     231.5 m/s
+    launch_fpa          0 deg
+end_component_type
+
+platform_type ASM_TARGET
+    side red
+end_platform_type
+
+platform_type ASM
+    side blue
+    component mover ASM_BODY
+    end_component
+    component guidance ASM_GUIDANCE
+        target_name   TGT_1
+        lethal_radius 100 m
+    end_component
+end_platform_type
+
+# 战区：AFSIM 那份的 `terrain.txt` 写的是 `#no terrain for now`，所以这里
+# 也取 `flat`——两边都是"地面恒 0"，靶标落在 z = 0 就是地面。
+zone NG_SECTOR
+    anchor     39.05 -89.80
+    radius     90 km
+    resolution 1 km
+    layers     1
+    terrain    flat
+end_zone
+
+# 目标：38.6N/90.3W，原脚本写 `altitude 1 m agl`。
+platform TGT_1 ASM_TARGET
+    position latlng 38.6000 -90.3000
+end_platform
+
+# 弹：39.5N/89.3W，投放瞬间的航向 270°（实测参照第一个样本 heading = −90°）。
+platform ASM_1 ASM
+    position latlng 39.5000 -89.3000
+    heading  270 deg
+end_platform

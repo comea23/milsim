@@ -1,0 +1,227 @@
+# 参数库示例：型号参数写在这里一次，想定里只写型号名（§5.5）。
+#
+# 语法与想定同源，只有 component_type / platform_type 两种块。另有两个
+# 库专用键：
+#   note    这个型号是什么
+#   source  参数值从哪来（公开资料 / 实测 / 估计）——军事模型里这一列
+#           不写，"这个 150 km 哪来的"半年后就没人答得上来
+#
+# 用法：
+#   python tools/model_library.py build library/demo_models.txt -o library/demo_models.db --lint
+#   python tools/model_library.py dump  library/demo_models.db
+#
+# 注意：型号名要与代码层的组件类**同名**才能被解析到（HEX_SEARCH_RADAR
+# 就是 @register_component("HEX_SEARCH_RADAR") 的那个类）。派生型号
+# （X : HEX_SEARCH_RADAR）只继承参数，行为仍是父类的算法。
+
+# ---- 传感器 -------------------------------------------------------------
+
+component_type HEX_SEARCH_RADAR
+    note "六边形搜索雷达的基型声明（不写参数，只给派生用）"
+end_component_type
+
+component_type RADAR_SEARCH_S : HEX_SEARCH_RADAR
+    note   "中程搜索雷达"
+    source "公开资料估算（2024）"
+    detect_range  60 km
+    scan_interval 2 s
+    # 扫描模式三个键（v0.13.24 起生效，缺省见 §5.12）：
+    #   fov          扫描视场 = 天线摆动的范围。360° = 圆周搜索；
+    #                0 < fov < 360 = 扇区扫描（中心看 scan_center）；
+    #                0 = 固定指向（还要给 beam_width，否则报错）。
+    #   scan_center  基准指向（扇区中心 / 固定指向）。圆周下只定相位零点。
+    #   beam_width   一次照射的瞬时张角（**不是** fov）。默认 0 = 零宽波束。
+    # 一台**圆周搜索**雷达就写 360°——"中程搜索"这种通用型号不该带朝向，
+    # 那是挂载方式（车头朝哪、扇区朝哪）的事，属于想定。
+    fov           360 deg
+end_component_type
+
+component_type RADAR_SEARCH_L : HEX_SEARCH_RADAR
+    note   "远程搜索雷达：只改探测距离，其余继承中程型"
+    source "公开资料估算（2024），探测距离按同类装备上限取"
+    detect_range  180 km
+end_component_type
+
+component_type RADAR_AA_1 : HEX_SEARCH_RADAR
+    note   "近程防空雷达：扫描快、视野窄（60° 扇区、朝正北）"
+    source "实测标定"
+    detect_range  15 km
+    scan_interval 500 ms
+    # 视野窄 = fov 小于整圈 ⇒ 这是一部**扇区扫描**雷达，在正北 ±30° 之间往复。
+    # 若它是固定指向的跟踪雷达，就写 fov 0 并给 beam_width（例如 2 deg）。
+    fov           60 deg
+end_component_type
+
+# ---- 机动 ---------------------------------------------------------------
+#
+# GROUND_MOVER 是框架的参考实现（milsim/models/mover.py，§5.7）。
+# 下面两个底盘型号的差别**不只是快慢**：轮式快但上不了山地，履带慢却能
+# 越野。可通行能力是**这辆车的参数**（`blocked_terrain`），不是地貌自己的
+# 属性——同一片山，对坦克是路、对卡车是墙，而地形数据只有一份。
+#
+# 写的是**地貌名字**不是编号：名字写错会当场报错并给拼写建议；编号写错
+# （比如把 4 写成 3）不会报错，只会表现为"这条门槛没生效"。
+#
+# 水面底盘用 WATER_MOVER（同一套 A* 加寻路，换一张运载器画像），
+# 吃水写在 **min_water_depth** 上：陆地格的水深恒为 0，所以正数的吃水
+# 等于"这条船开不上岸"。那是定义，不是毛病。
+
+component_type GROUND_MOVER
+    note "地面机动的基型声明（对接框架参考实现）"
+end_component_type
+
+component_type MOVER_WHEELED : GROUND_MOVER
+    note   "轮式底盘：快，但进不了山地"
+    source "公开资料"
+    max_speed       25 m/s
+    # 转向速率是三自由度里的第二个（§5.7.11）：转弯半径 = 速率 ÷ 角速度。
+    # 单位是 deg/s，不是 deg——写错单位当场报错，不会静默按"总共 12 度"算。
+    turn_rate       12 deg/s
+    blocked_terrain [山地]
+end_component_type
+
+component_type MOVER_TRACKED : GROUND_MOVER
+    note   "履带底盘：慢但能越野（不封任何地貌）"
+    source "公开资料"
+    max_speed 15 m/s
+    # 履带能原地转向，转向速率比轮式高一个量级。
+    turn_rate 40 deg/s
+end_component_type
+
+component_type WATER_MOVER
+    note "水面机动的基型声明（对接框架参考实现）"
+end_component_type
+
+component_type SHIP_COASTAL : WATER_MOVER
+    note   "近海巡逻艇：吃水 8 m"
+    source "公开资料估算"
+    max_speed       12 m/s
+    turn_rate       3 deg/s
+    min_water_depth 8 m
+end_component_type
+
+# 水下底盘用 SUBSURFACE_MOVER（同一套 A* 与路点跟随，换一张水面画像）。
+# 它的门槛**不是** min_water_depth 那一个数：水深要求 = 定深 + 离底余量，
+# 由代码算出来（§5.7）。所以这里写的是"潜多深"而不是"要多深的水"——
+# 同一个数字写两遍迟早会不同步，而症状是"寻路绕开了、实际那一脚却已进海底"。
+component_type SUBSURFACE_MOVER
+    note "水下机动的基型声明（对接框架参考实现）"
+end_component_type
+
+component_type SUB_NUCLEAR : SUBSURFACE_MOVER
+    note   "核潜艇：水下巡航，定深 60 m"
+    source "公开资料估算（航速与潜深取公开的上限量级）"
+    max_speed      12 m/s
+    # 潜艇是四个型号里转向最迟钝的（舵效随航速下降、艇体又长）。
+    turn_rate      1 deg/s
+    cruise_depth   60 m
+    hull_clearance 10 m
+    dive_rate      2 m/s
+    surface_rate   4 m/s
+end_component_type
+
+# ---- 弹（弹体 + 制导件两个部件，§5.8）------------------------------------
+#
+# 弹是**两个部件**：弹体（MISSILE_MOVER）管"能不能做到"（推力、燃料、过载、
+# 重力），制导件（*_GUIDANCE）管"要往哪飞"（哪个阶段、什么高度、什么时候
+# 算命中）。所以库里的一个"弹型号"其实是**两条**：想定里分别写
+# `component mover SSM_CRUISE` 与 `component guidance GUID_CRUISE_1`。
+#
+# **阶段表（`phases`）不在库里写**——它不是标量也不是字符串，是一张结构化
+# 的表，而库文本一条记录只能表达"键 = 一个字面量"。所以库里的制导型号给的是
+# **剧本之外的参数**（引信多近起爆、导引增益、高度环增益），剧本本身来自代码
+# 层的参考实现（`CRUISE_PHASES` / `BALLISTIC_PHASES`）。要另一种剧本就派生
+# 一个制导件类，型号继承那个派生类（"换一种弹 = 换一张表"这条不变，只是表
+# 由代码而不是库提供）。
+#
+# `target_name` 也**不写进库**：它是"这一发打哪个目标"，属想定的事，不是型号
+# 的属性。库里的型号因此可以直接复用。
+#
+# 射程不是库里的参数，也不是任何地方的一个数——它由燃料 + 推力 + 比冲 + 阻力
+# 积出来（§5.8.6）。这里的两个型号与 scenarios/mover_demo.txt 里的参数一致。
+
+component_type MISSILE_MOVER
+    note "弹体的基型声明（对接框架参考实现）"
+end_component_type
+
+component_type CRUISE_GUIDANCE
+    note "巡航弹制导的基型声明（对接框架参考实现）"
+end_component_type
+
+component_type BALLISTIC_GUIDANCE
+    note "弹道弹制导的基型声明（对接框架参考实现）"
+end_component_type
+
+component_type SSM_CRUISE : MISSILE_MOVER
+    note   "巡航导弹弹体：涡扇，推力只有重量的 0.14 倍，必须有初速"
+    source "参考演示想定；量级与公开的巡航弹一致（估）"
+    mass              1200 kg
+    fuel_mass          250 kg
+    thrust             1.6 kN
+    # 比冲的基本单位是秒（涡扇量级 3000，火箭在 250 上下）——写 3000 ms
+    # 会得到差 1000 倍的燃料消耗率，而单看数字看不出来，所以单位必须写。
+    specific_impulse  3000 s
+    drag_area          0.024 m2
+    radial_accel        12 m/s2
+    max_speed          300 m/s
+    # launch_speed 非有不可：这台涡扇推重比 0.14，从静止起步连速度系都
+    # 建立不起来（§5.8.4）。载机投放 / 助推段交出来的初速写在这里。
+    launch_speed       240 m/s
+    launch_fpa           0 deg
+end_component_type
+
+component_type GUID_CRUISE_1 : CRUISE_GUIDANCE
+    note   "巡航弹制导：贴地 50 m 定高定速 + 末段比例导引"
+    source "参考演示想定（引信 30 m 对应近炸引信作用距离）"
+    lethal_radius  30 m
+    altitude_gain  0.03
+    climb_gain      1.0
+end_component_type
+
+component_type SSM_SRBM : MISSILE_MOVER
+    note   "近程弹道导弹弹体：固体火箭，垂直发射"
+    source "参考演示想定；固体比冲取 250 s（公开的量级）"
+    mass               800 kg
+    fuel_mass          400 kg
+    thrust              66 kN
+    specific_impulse    250 s
+    drag_area           0.09 m2
+    # 弹道弹在主动段靠转发动机喷流转向，"转弯半径"那个概念在这里没有意义，
+    # 所以过载上限比巡航弹大得多（40 对 12）。
+    radial_accel        40 m/s2
+    max_speed         1500 m/s
+    # 垂直发射（85~89 deg）。
+    launch_fpa          85 deg
+end_component_type
+
+component_type GUID_SRBM_1 : BALLISTIC_GUIDANCE
+    note   "弹道弹制导：近垂直起飞 → 程序转弯 → 关掉制导自由飞 → 末段收口"
+    source "参考演示想定"
+    lethal_radius  30 m
+    intercept_gain  3.0
+end_component_type
+
+# ---- 平台 ---------------------------------------------------------------
+#
+# 平台型的属性**有参数表了**（§5.6）：表里的键来自代码层的 Platform 类
+# （models/platform.py），所以这里写错一个字母会报错并给拼写建议，而不是
+# 静默失效。表里的键刻意很少——只有 `side`（实体建档时取用）与
+# `decision`（决策接线取用）这两个**真的有人读**的参数；呼号、编制、
+# RCS 等感知/交战层的消费者就位后再加（新增带默认值的参数不算破坏性改动）。
+#
+# 注意最高速度**不在**平台属性里，它属于机动件——同一件事存两份迟早
+# 不同步，而"哪份为准"到时候没人答得上来。
+
+platform_type ARMOR_BASE
+    note   "通用装甲底盘（平台型参数的示例）"
+    source "编制表"
+    side    red
+end_platform_type
+
+platform_type TANK_MBT : ARMOR_BASE
+    note "主战坦克"
+end_platform_type
+
+platform_type RECON_VEHICLE : ARMOR_BASE
+    note "侦察车"
+end_platform_type

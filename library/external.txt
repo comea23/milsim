@@ -1,0 +1,2182 @@
+# 参数库：Mozi\MoziWeaponData.json + radarData.json（mozi_import.py）
+# 型号 59 个，修订 6a75f5dcc6da
+
+component_type HEX_SEARCH_RADAR
+    note  "六边形搜索雷达的基型声明（演示件；不写参数，只给派生用）"
+end_component_type
+
+component_type MISSILE_MOVER
+    note  "弹体的基型声明（对接框架参考实现；不写参数，只给派生用）"
+end_component_type
+
+component_type MOZI_W_000000000044 : MISSILE_MOVER
+    note       "BGM-109G型“战斧”陆基巡航导弹[W80-0型20万吨级核弹]"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.06371 m2
+    mass       1200 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         0
+        CEP_m                80
+        CruiseAltitude_m     60.9
+        Diameter_m           0.52
+        GUID                 hsfw-dataweapon-00000000000044
+        LaunchSpeedMax_mps   0
+        Length_m             6.2
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             85
+        PoK_Subsurface       0
+        PoK_Surface          0
+        Range_Air_km         0
+        Range_Land_km        1350
+        Range_Subsurface_km  0
+        Range_Surface_km     0
+        Span_m               2.6
+        TargetSpeedMax_mps   0
+        WaypointNumber       20
+        Weight_kg            1200
+        世代                 1001
+        动力                 巡航
+        名称                 "BGM-109G型“战斧”陆基巡航导弹[W80-0型20万吨级核弹]"
+        国别                 美国
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000000228 : MISSILE_MOVER
+    note       "RGM-109A 战斧式巡航导弹 TLAM-N [W80-0 200kT 核]"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.06371 m2
+    mass       1200 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         0
+        CEP_m                80
+        CruiseAltitude_m     60.9
+        Diameter_m           0.52
+        GUID                 hsfw-dataweapon-00000000000228
+        LaunchSpeedMax_mps   0
+        Length_m             6.2
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             85
+        PoK_Subsurface       0
+        PoK_Surface          0
+        Range_Air_km         0
+        Range_Land_km        1350
+        Range_Subsurface_km  0
+        Range_Surface_km     0
+        Span_m               2.6
+        TargetSpeedMax_mps   0
+        WaypointNumber       20
+        Weight_kg            1200
+        世代                 1001
+        动力                 巡航
+        名称                 "RGM-109A 战斧式巡航导弹 TLAM-N [W80-0 200kT 核]"
+        国别                 美国
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000000229 : MISSILE_MOVER
+    note       "RGM-109B 战斧式巡航导弹 TASM"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.06371 m2
+    fuel_mass  814.9 kg
+    mass       1200 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         4
+        CEP_m                0
+        CruiseAltitude_m     18.2
+        Diameter_m           0.52
+        GUID                 hsfw-dataweapon-00000000000229
+        LaunchSpeedMax_mps   0
+        Length_m             6.2
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             0
+        PoK_Subsurface       0
+        PoK_Surface          85
+        Range_Air_km         0
+        Range_Land_km        0
+        Range_Subsurface_km  0
+        Range_Surface_km     250
+        Span_m               2.6
+        TargetSpeedMax_mps   0
+        WaypointNumber       20
+        Weight_kg            1200
+        fuel_source          range
+        世代                 1001
+        动力                 巡航
+        反推_CdA_m2          0.06371
+        反推_Isp_s           293
+        反推_射程km          250
+        名称                 "RGM-109B 战斧式巡航导弹 TASM"
+        国别                 美国
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000000230 : MISSILE_MOVER
+    note       "RGM-109C 战斧式巡航导弹 Blk II TLAM-C"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.06371 m2
+    mass       1200 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         0
+        CEP_m                10
+        CruiseAltitude_m     60.9
+        Diameter_m           0.52
+        GUID                 hsfw-dataweapon-00000000000230
+        LaunchSpeedMax_mps   0
+        Length_m             6.2
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             85
+        PoK_Subsurface       0
+        PoK_Surface          0
+        Range_Air_km         0
+        Range_Land_km        675
+        Range_Subsurface_km  0
+        Range_Surface_km     0
+        Span_m               2.6
+        TargetSpeedMax_mps   0
+        WaypointNumber       20
+        Weight_kg            1200
+        世代                 1001
+        动力                 巡航
+        名称                 "RGM-109C 战斧式巡航导弹 Blk II TLAM-C"
+        国别                 美国
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000000231 : MISSILE_MOVER
+    note       "RGM-109D战斧式巡航导弹Blk II常规对地攻击子弹药导弹"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.06371 m2
+    mass       1200 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         0
+        CEP_m                10
+        CruiseAltitude_m     60.9
+        Diameter_m           0.52
+        GUID                 hsfw-dataweapon-00000000000231
+        LaunchSpeedMax_mps   0
+        Length_m             6.2
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             85
+        PoK_Subsurface       0
+        PoK_Surface          0
+        Range_Air_km         0
+        Range_Land_km        460
+        Range_Subsurface_km  0
+        Range_Surface_km     0
+        Span_m               2.6
+        TargetSpeedMax_mps   0
+        WaypointNumber       20
+        Weight_kg            1200
+        世代                 1001
+        动力                 巡航
+        名称                 "RGM-109D战斧式巡航导弹Blk II常规对地攻击子弹药导弹"
+        国别                 全部
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000000338 : MISSILE_MOVER
+    note       "SS-1D型“飞毛腿”地地弹道导弹[子母弹]"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.18246 m2
+    fuel_mass  4424 kg
+    mass       6500 kg
+    attr
+        BurnoutWeight_kg     2076
+        CEPSurface_m         0
+        CEP_m                50
+        CruiseAltitude_m     0
+        Diameter_m           0.88
+        GUID                 hsfw-dataweapon-00000000000338
+        LaunchSpeedMax_mps   0
+        Length_m             12.3
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             85
+        PoK_Subsurface       0
+        PoK_Surface          0
+        Range_Air_km         0
+        Range_Land_km        160
+        Range_Subsurface_km  0
+        Range_Surface_km     0
+        Span_m               1.8
+        TargetSpeedMax_mps   0
+        WaypointNumber       0
+        Weight_kg            6500
+        fuel_source          burnout
+        世代                 1001
+        动力                 弹道
+        名称                 "SS-1D型“飞毛腿”地地弹道导弹[子母弹]"
+        国别                 全部
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000000339 : MISSILE_MOVER
+    note       "SS-1D型“飞毛腿”地地弹道导弹[常规弹头]"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.18246 m2
+    fuel_mass  4424 kg
+    mass       6500 kg
+    attr
+        BurnoutWeight_kg     2076
+        CEPSurface_m         0
+        CEP_m                50
+        CruiseAltitude_m     0
+        Diameter_m           0.88
+        GUID                 hsfw-dataweapon-00000000000339
+        LaunchSpeedMax_mps   0
+        Length_m             12.3
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             85
+        PoK_Subsurface       0
+        PoK_Surface          0
+        Range_Air_km         0
+        Range_Land_km        160
+        Range_Subsurface_km  0
+        Range_Surface_km     0
+        Span_m               1.8
+        TargetSpeedMax_mps   0
+        WaypointNumber       0
+        Weight_kg            6500
+        fuel_source          burnout
+        世代                 1001
+        动力                 弹道
+        名称                 "SS-1D型“飞毛腿”地地弹道导弹[常规弹头]"
+        国别                 全部
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000000373 : MISSILE_MOVER
+    note       "UGM-109B型“战斧”海射反舰导弹"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.06371 m2
+    fuel_mass  814.9 kg
+    mass       1200 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         4
+        CEP_m                0
+        CruiseAltitude_m     18.2
+        Diameter_m           0.52
+        GUID                 hsfw-dataweapon-00000000000373
+        LaunchSpeedMax_mps   0
+        Length_m             6.2
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             0
+        PoK_Subsurface       0
+        PoK_Surface          85
+        Range_Air_km         0
+        Range_Land_km        0
+        Range_Subsurface_km  0
+        Range_Surface_km     250
+        Span_m               2.6
+        TargetSpeedMax_mps   0
+        WaypointNumber       20
+        Weight_kg            1200
+        fuel_source          range
+        世代                 1001
+        动力                 巡航
+        反推_CdA_m2          0.06371
+        反推_Isp_s           293
+        反推_射程km          250
+        名称                 "UGM-109B型“战斧”海射反舰导弹"
+        国别                 全部
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000000376 : MISSILE_MOVER
+    note       "UGM-109A型“战斧”海射对地攻击巡航导弹[W80-0型20万吨级核弹]"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.06371 m2
+    mass       1200 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         0
+        CEP_m                80
+        CruiseAltitude_m     60.9
+        Diameter_m           0.52
+        GUID                 hsfw-dataweapon-00000000000376
+        LaunchSpeedMax_mps   0
+        Length_m             6.2
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             85
+        PoK_Subsurface       0
+        PoK_Surface          0
+        Range_Air_km         0
+        Range_Land_km        1350
+        Range_Subsurface_km  0
+        Range_Surface_km     0
+        Span_m               2.6
+        TargetSpeedMax_mps   0
+        WaypointNumber       20
+        Weight_kg            1200
+        世代                 1001
+        动力                 巡航
+        名称                 "UGM-109A型“战斧”海射对地攻击巡航导弹[W80-0型20万吨级核弹]"
+        国别                 全部
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000000377 : MISSILE_MOVER
+    note       "UGM-109E 战斧 Blk IV巡航导弹"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.06371 m2
+    mass       1200 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         0
+        CEP_m                2
+        CruiseAltitude_m     60.9
+        Diameter_m           0.52
+        GUID                 hsfw-dataweapon-00000000000377
+        LaunchSpeedMax_mps   0
+        Length_m             6.2
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             95
+        PoK_Subsurface       0
+        PoK_Surface          0
+        Range_Air_km         0
+        Range_Land_km        1600
+        Range_Subsurface_km  0
+        Range_Surface_km     0
+        Span_m               2.6
+        TargetSpeedMax_mps   0
+        WaypointNumber       20
+        Weight_kg            1200
+        世代                 1001
+        动力                 巡航
+        名称                 "UGM-109E 战斧 Blk IV巡航导弹"
+        国别                 全部
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000000378 : MISSILE_MOVER
+    note       "UGM-109D “战斧”Blk III 对地攻击导弹"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.06371 m2
+    mass       1200 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         0
+        CEP_m                2
+        CruiseAltitude_m     60.9
+        Diameter_m           0.52
+        GUID                 hsfw-dataweapon-00000000000378
+        LaunchSpeedMax_mps   0
+        Length_m             6.2
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             90
+        PoK_Subsurface       0
+        PoK_Surface          0
+        Range_Air_km         0
+        Range_Land_km        500
+        Range_Subsurface_km  0
+        Range_Surface_km     0
+        Span_m               2.6
+        TargetSpeedMax_mps   0
+        WaypointNumber       20
+        Weight_kg            1200
+        世代                 1001
+        动力                 "其余（防空/空空等）"
+        名称                 "UGM-109D “战斧”Blk III 对地攻击导弹"
+        国别                 全部
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000000379 : MISSILE_MOVER
+    note       "UGM-109D “战斧” Blk II 对地攻击导弹"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.06371 m2
+    mass       1200 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         0
+        CEP_m                10
+        CruiseAltitude_m     60.9
+        Diameter_m           0.52
+        GUID                 hsfw-dataweapon-00000000000379
+        LaunchSpeedMax_mps   0
+        Length_m             6.2
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             85
+        PoK_Subsurface       0
+        PoK_Surface          0
+        Range_Air_km         0
+        Range_Land_km        460
+        Range_Subsurface_km  0
+        Range_Surface_km     0
+        Span_m               2.6
+        TargetSpeedMax_mps   0
+        WaypointNumber       20
+        Weight_kg            1200
+        世代                 1001
+        动力                 "其余（防空/空空等）"
+        名称                 "UGM-109D “战斧” Blk II 对地攻击导弹"
+        国别                 全部
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000000380 : MISSILE_MOVER
+    note       "UGM-109C “战斧” Blk II 对地攻击导弹"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.06371 m2
+    mass       1200 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         0
+        CEP_m                10
+        CruiseAltitude_m     60.9
+        Diameter_m           0.52
+        GUID                 hsfw-dataweapon-00000000000380
+        LaunchSpeedMax_mps   0
+        Length_m             6.2
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             85
+        PoK_Subsurface       0
+        PoK_Surface          0
+        Range_Air_km         0
+        Range_Land_km        675
+        Range_Subsurface_km  0
+        Range_Surface_km     0
+        Span_m               2.6
+        TargetSpeedMax_mps   0
+        WaypointNumber       20
+        Weight_kg            1200
+        世代                 1001
+        动力                 "其余（防空/空空等）"
+        名称                 "UGM-109C “战斧” Blk II 对地攻击导弹"
+        国别                 全部
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000000382 : MISSILE_MOVER
+    note       "UGM-109C “战斧”Blk III 对地攻击导弹"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.06371 m2
+    mass       1200 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         0
+        CEP_m                2
+        CruiseAltitude_m     60.9
+        Diameter_m           0.52
+        GUID                 hsfw-dataweapon-00000000000382
+        LaunchSpeedMax_mps   0
+        Length_m             6.2
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             90
+        PoK_Subsurface       0
+        PoK_Surface          0
+        Range_Air_km         0
+        Range_Land_km        1000
+        Range_Subsurface_km  0
+        Range_Surface_km     0
+        Span_m               2.6
+        TargetSpeedMax_mps   0
+        WaypointNumber       20
+        Weight_kg            1200
+        世代                 1001
+        动力                 "其余（防空/空空等）"
+        名称                 "UGM-109C “战斧”Blk III 对地攻击导弹"
+        国别                 全部
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000000404 : MISSILE_MOVER
+    note       "AGM-84A型“鱼叉”反舰导弹"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.02724 m2
+    fuel_mass  90.6 kg
+    mass       522 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         4
+        CEP_m                0
+        CruiseAltitude_m     54.8
+        Diameter_m           0.34
+        GUID                 hsfw-dataweapon-00000000000404
+        LaunchSpeedMax_mps   0
+        Length_m             3.8
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             0
+        PoK_Subsurface       0
+        PoK_Surface          85
+        Range_Air_km         0
+        Range_Land_km        0
+        Range_Subsurface_km  0
+        Range_Surface_km     65
+        Span_m               0.9
+        TargetSpeedMax_mps   0
+        WaypointNumber       0
+        Weight_kg            522
+        fuel_source          range
+        世代                 1001
+        动力                 巡航
+        反推_CdA_m2          0.02724
+        反推_Isp_s           293
+        反推_射程km          65
+        名称                 "AGM-84A型“鱼叉”反舰导弹"
+        国别                 美国
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000000434 : MISSILE_MOVER
+    note       "RGM-109H “侵彻型式战术战斧” Blk IV 巡航导弹"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.06371 m2
+    mass       1200 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         0
+        CEP_m                2
+        CruiseAltitude_m     60.9
+        Diameter_m           0.52
+        GUID                 hsfw-dataweapon-00000000000434
+        LaunchSpeedMax_mps   0
+        Length_m             6.2
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             95
+        PoK_Subsurface       0
+        PoK_Surface          0
+        Range_Air_km         0
+        Range_Land_km        1600
+        Range_Subsurface_km  0
+        Range_Surface_km     0
+        Span_m               2.6
+        TargetSpeedMax_mps   0
+        WaypointNumber       20
+        Weight_kg            1200
+        世代                 1001
+        动力                 巡航
+        名称                 "RGM-109H “侵彻型式战术战斧” Blk IV 巡航导弹"
+        国别                 全部
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000000452 : MISSILE_MOVER
+    note       "AGM-84K型“鱼叉”反舰导弹"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.02724 m2
+    fuel_mass  209 kg
+    mass       675 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         2
+        CEP_m                2
+        CruiseAltitude_m     91.4
+        Diameter_m           0.34
+        GUID                 hsfw-dataweapon-00000000000452
+        LaunchSpeedMax_mps   0
+        Length_m             4.4
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             95
+        PoK_Subsurface       0
+        PoK_Surface          95
+        Range_Air_km         0
+        Range_Land_km        150
+        Range_Subsurface_km  0
+        Range_Surface_km     150
+        Span_m               2.2
+        TargetSpeedMax_mps   0
+        WaypointNumber       20
+        Weight_kg            675
+        fuel_source          range
+        世代                 1001
+        动力                 巡航
+        反推_CdA_m2          0.02724
+        反推_Isp_s           293
+        反推_射程km          150
+        名称                 "AGM-84K型“鱼叉”反舰导弹"
+        国别                 美国
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000000586 : MISSILE_MOVER
+    note       "RGM-109E 战术战斧 Blk IV 巡航导弹"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.06371 m2
+    mass       1200 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         0
+        CEP_m                2
+        CruiseAltitude_m     60.9
+        Diameter_m           0.52
+        GUID                 hsfw-dataweapon-00000000000586
+        LaunchSpeedMax_mps   0
+        Length_m             6.2
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             95
+        PoK_Subsurface       0
+        PoK_Surface          0
+        Range_Air_km         0
+        Range_Land_km        1600
+        Range_Subsurface_km  0
+        Range_Surface_km     0
+        Span_m               2.6
+        TargetSpeedMax_mps   0
+        WaypointNumber       20
+        Weight_kg            1200
+        世代                 1001
+        动力                 巡航
+        名称                 "RGM-109E 战术战斧 Blk IV 巡航导弹"
+        国别                 全部
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000000589 : MISSILE_MOVER
+    note       "RGM-84L “鱼叉”II反舰导弹"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.02724 m2
+    fuel_mass  104.5 kg
+    mass       522 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         4
+        CEP_m                4
+        CruiseAltitude_m     9.1
+        Diameter_m           0.34
+        GUID                 hsfw-dataweapon-00000000000589
+        LaunchSpeedMax_mps   0
+        Length_m             3.8
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             95
+        PoK_Subsurface       0
+        PoK_Surface          95
+        Range_Air_km         0
+        Range_Land_km        75
+        Range_Subsurface_km  0
+        Range_Surface_km     75
+        Span_m               0.9
+        TargetSpeedMax_mps   0
+        WaypointNumber       6
+        Weight_kg            522
+        fuel_source          range
+        世代                 1001
+        动力                 巡航
+        反推_CdA_m2          0.02724
+        反推_Isp_s           293
+        反推_射程km          75
+        名称                 "RGM-84L “鱼叉”II反舰导弹"
+        国别                 中国台湾
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000000591 : MISSILE_MOVER
+    note       "RGM-84G “鱼叉”反舰导弹"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.02724 m2
+    fuel_mass  104.5 kg
+    mass       522 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         4
+        CEP_m                0
+        CruiseAltitude_m     9.1
+        Diameter_m           0.34
+        GUID                 hsfw-dataweapon-00000000000591
+        LaunchSpeedMax_mps   0
+        Length_m             3.8
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             0
+        PoK_Subsurface       0
+        PoK_Surface          90
+        Range_Air_km         0
+        Range_Land_km        0
+        Range_Subsurface_km  0
+        Range_Surface_km     75
+        Span_m               0.9
+        TargetSpeedMax_mps   0
+        WaypointNumber       6
+        Weight_kg            522
+        fuel_source          range
+        世代                 1001
+        动力                 巡航
+        反推_CdA_m2          0.02724
+        反推_Isp_s           293
+        反推_射程km          75
+        名称                 "RGM-84G “鱼叉”反舰导弹"
+        国别                 全部
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000000593 : MISSILE_MOVER
+    note       "AGM-84G型'鱼叉'反舰导弹"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.02724 m2
+    fuel_mass  104.5 kg
+    mass       522 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         4
+        CEP_m                0
+        CruiseAltitude_m     9.1
+        Diameter_m           0.34
+        GUID                 hsfw-dataweapon-00000000000593
+        LaunchSpeedMax_mps   0
+        Length_m             3.8
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             0
+        PoK_Subsurface       0
+        PoK_Surface          90
+        Range_Air_km         0
+        Range_Land_km        0
+        Range_Subsurface_km  0
+        Range_Surface_km     75
+        Span_m               0.9
+        TargetSpeedMax_mps   0
+        WaypointNumber       0
+        Weight_kg            522
+        fuel_source          range
+        世代                 1001
+        动力                 巡航
+        反推_CdA_m2          0.02724
+        反推_Isp_s           293
+        反推_射程km          75
+        名称                 "AGM-84G型'鱼叉'反舰导弹"
+        国别                 美国
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000000621 : MISSILE_MOVER
+    note       "AGM-84H型“鱼叉”反舰导弹"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.02724 m2
+    fuel_mass  209 kg
+    mass       675 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         2
+        CEP_m                2
+        CruiseAltitude_m     91.4
+        Diameter_m           0.34
+        GUID                 hsfw-dataweapon-00000000000621
+        LaunchSpeedMax_mps   0
+        Length_m             4.4
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             95
+        PoK_Subsurface       0
+        PoK_Surface          95
+        Range_Air_km         0
+        Range_Land_km        150
+        Range_Subsurface_km  0
+        Range_Surface_km     150
+        Span_m               2.2
+        TargetSpeedMax_mps   0
+        WaypointNumber       20
+        Weight_kg            675
+        fuel_source          range
+        世代                 1001
+        动力                 巡航
+        反推_CdA_m2          0.02724
+        反推_Isp_s           293
+        反推_射程km          150
+        名称                 "AGM-84H型“鱼叉”反舰导弹"
+        国别                 美国
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000000744 : MISSILE_MOVER
+    note       "RGM-109D战斧式巡航导弹Blk III常规对地攻击子弹药导弹"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.06371 m2
+    mass       1200 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         0
+        CEP_m                2
+        CruiseAltitude_m     60.9
+        Diameter_m           0.52
+        GUID                 hsfw-dataweapon-00000000000744
+        LaunchSpeedMax_mps   0
+        Length_m             6.2
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             90
+        PoK_Subsurface       0
+        PoK_Surface          0
+        Range_Air_km         0
+        Range_Land_km        500
+        Range_Subsurface_km  0
+        Range_Surface_km     0
+        Span_m               2.6
+        TargetSpeedMax_mps   0
+        WaypointNumber       20
+        Weight_kg            1200
+        世代                 1001
+        动力                 巡航
+        名称                 "RGM-109D战斧式巡航导弹Blk III常规对地攻击子弹药导弹"
+        国别                 全部
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000000808 : MISSILE_MOVER
+    note       "UGM-109D Blk III战斧对地攻击巡航导弹"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.06371 m2
+    mass       1200 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         0
+        CEP_m                2
+        CruiseAltitude_m     60.9
+        Diameter_m           0.52
+        GUID                 hsfw-dataweapon-00000000000808
+        LaunchSpeedMax_mps   0
+        Length_m             6.2
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             90
+        PoK_Subsurface       0
+        PoK_Surface          0
+        Range_Air_km         0
+        Range_Land_km        500
+        Range_Subsurface_km  0
+        Range_Surface_km     0
+        Span_m               2.6
+        TargetSpeedMax_mps   0
+        WaypointNumber       20
+        Weight_kg            1200
+        世代                 1001
+        动力                 巡航
+        名称                 "UGM-109D Blk III战斧对地攻击巡航导弹"
+        国别                 全部
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000000809 : MISSILE_MOVER
+    note       "UGM-109D Blk III战斧对地攻击巡航导弹"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.06371 m2
+    mass       1200 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         0
+        CEP_m                10
+        CruiseAltitude_m     60.9
+        Diameter_m           0.52
+        GUID                 hsfw-dataweapon-00000000000809
+        LaunchSpeedMax_mps   0
+        Length_m             6.2
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             85
+        PoK_Subsurface       0
+        PoK_Surface          0
+        Range_Air_km         0
+        Range_Land_km        460
+        Range_Subsurface_km  0
+        Range_Surface_km     0
+        Span_m               2.6
+        TargetSpeedMax_mps   0
+        WaypointNumber       20
+        Weight_kg            1200
+        世代                 1001
+        动力                 巡航
+        名称                 "UGM-109D Blk III战斧对地攻击巡航导弹"
+        国别                 全部
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000000810 : MISSILE_MOVER
+    note       "UGM-109E 战斧 Blk IV巡航导弹"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.06371 m2
+    mass       1200 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         0
+        CEP_m                2
+        CruiseAltitude_m     60.9
+        Diameter_m           0.52
+        GUID                 hsfw-dataweapon-00000000000810
+        LaunchSpeedMax_mps   0
+        Length_m             6.2
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             95
+        PoK_Subsurface       0
+        PoK_Surface          0
+        Range_Air_km         0
+        Range_Land_km        1600
+        Range_Subsurface_km  0
+        Range_Surface_km     0
+        Span_m               2.6
+        TargetSpeedMax_mps   0
+        WaypointNumber       20
+        Weight_kg            1200
+        世代                 1001
+        动力                 巡航
+        名称                 "UGM-109E 战斧 Blk IV巡航导弹"
+        国别                 全部
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000000811 : MISSILE_MOVER
+    note       "UGM-109C Blk III战斧对地攻击巡航导弹"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.06371 m2
+    mass       1200 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         0
+        CEP_m                2
+        CruiseAltitude_m     60.9
+        Diameter_m           0.52
+        GUID                 hsfw-dataweapon-00000000000811
+        LaunchSpeedMax_mps   0
+        Length_m             6.2
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             90
+        PoK_Subsurface       0
+        PoK_Surface          0
+        Range_Air_km         0
+        Range_Land_km        1000
+        Range_Subsurface_km  0
+        Range_Surface_km     0
+        Span_m               2.6
+        TargetSpeedMax_mps   0
+        WaypointNumber       20
+        Weight_kg            1200
+        世代                 1001
+        动力                 巡航
+        名称                 "UGM-109C Blk III战斧对地攻击巡航导弹"
+        国别                 全部
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000000812 : MISSILE_MOVER
+    note       "UGM-109C Blk II战斧对地攻击巡航导弹"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.06371 m2
+    mass       1200 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         0
+        CEP_m                10
+        CruiseAltitude_m     60.9
+        Diameter_m           0.52
+        GUID                 hsfw-dataweapon-00000000000812
+        LaunchSpeedMax_mps   0
+        Length_m             6.2
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             85
+        PoK_Subsurface       0
+        PoK_Surface          0
+        Range_Air_km         0
+        Range_Land_km        675
+        Range_Subsurface_km  0
+        Range_Surface_km     0
+        Span_m               2.6
+        TargetSpeedMax_mps   0
+        WaypointNumber       20
+        Weight_kg            1200
+        世代                 1001
+        动力                 巡航
+        名称                 "UGM-109C Blk II战斧对地攻击巡航导弹"
+        国别                 全部
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000000814 : MISSILE_MOVER
+    note       "UGM-109B型“战斧”海射反舰导弹"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.06371 m2
+    fuel_mass  814.9 kg
+    mass       1200 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         4
+        CEP_m                0
+        CruiseAltitude_m     18.2
+        Diameter_m           0.52
+        GUID                 hsfw-dataweapon-00000000000814
+        LaunchSpeedMax_mps   0
+        Length_m             6.2
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             0
+        PoK_Subsurface       0
+        PoK_Surface          85
+        Range_Air_km         0
+        Range_Land_km        0
+        Range_Subsurface_km  0
+        Range_Surface_km     250
+        Span_m               2.6
+        TargetSpeedMax_mps   0
+        WaypointNumber       20
+        Weight_kg            1200
+        fuel_source          range
+        世代                 1001
+        动力                 巡航
+        反推_CdA_m2          0.06371
+        反推_Isp_s           293
+        反推_射程km          250
+        名称                 "UGM-109B型“战斧”海射反舰导弹"
+        国别                 全部
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000000816 : MISSILE_MOVER
+    note       "AGM-84L型“鱼叉-2”反舰导弹"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.02724 m2
+    fuel_mass  104.5 kg
+    mass       522 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         4
+        CEP_m                4
+        CruiseAltitude_m     9.1
+        Diameter_m           0.34
+        GUID                 hsfw-dataweapon-00000000000816
+        LaunchSpeedMax_mps   0
+        Length_m             3.8
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             95
+        PoK_Subsurface       0
+        PoK_Surface          95
+        Range_Air_km         0
+        Range_Land_km        75
+        Range_Subsurface_km  0
+        Range_Surface_km     75
+        Span_m               0.9
+        TargetSpeedMax_mps   0
+        WaypointNumber       0
+        Weight_kg            522
+        fuel_source          range
+        世代                 1001
+        动力                 巡航
+        反推_CdA_m2          0.02724
+        反推_Isp_s           293
+        反推_射程km          75
+        名称                 "AGM-84L型“鱼叉-2”反舰导弹"
+        国别                 美国
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000000818 : MISSILE_MOVER
+    note       "UGM-109A型“战斧”海射对地攻击巡航导弹[W80-0型20万吨级核弹]"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.06371 m2
+    mass       1200 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         0
+        CEP_m                80
+        CruiseAltitude_m     60.9
+        Diameter_m           0.52
+        GUID                 hsfw-dataweapon-00000000000818
+        LaunchSpeedMax_mps   0
+        Length_m             6.2
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             85
+        PoK_Subsurface       0
+        PoK_Surface          0
+        Range_Air_km         0
+        Range_Land_km        1350
+        Range_Subsurface_km  0
+        Range_Surface_km     0
+        Span_m               2.6
+        TargetSpeedMax_mps   0
+        WaypointNumber       20
+        Weight_kg            1200
+        世代                 1001
+        动力                 巡航
+        名称                 "UGM-109A型“战斧”海射对地攻击巡航导弹[W80-0型20万吨级核弹]"
+        国别                 全部
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000000918 : MISSILE_MOVER
+    note       "SS-1B型“飞毛腿”地地弹道导弹[8K14-8F14型，7万吨级核弹]"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.18246 m2
+    fuel_mass  3824 kg
+    mass       5900 kg
+    attr
+        BurnoutWeight_kg     2076
+        CEPSurface_m         0
+        CEP_m                450
+        CruiseAltitude_m     0
+        Diameter_m           0.88
+        GUID                 hsfw-dataweapon-00000000000918
+        LaunchSpeedMax_mps   0
+        Length_m             11.25
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             75
+        PoK_Subsurface       0
+        PoK_Surface          0
+        Range_Air_km         0
+        Range_Land_km        160
+        Range_Subsurface_km  0
+        Range_Surface_km     0
+        Span_m               1.8
+        TargetSpeedMax_mps   0
+        WaypointNumber       0
+        Weight_kg            5900
+        fuel_source          burnout
+        世代                 1001
+        动力                 弹道
+        名称                 "SS-1B型“飞毛腿”地地弹道导弹[8K14-8F14型，7万吨级核弹]"
+        国别                 全部
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000000921 : MISSILE_MOVER
+    note       "SS-1C型“飞毛腿”地地弹道导弹[7万吨级核弹]"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.18246 m2
+    fuel_mass  4324 kg
+    mass       6400 kg
+    attr
+        BurnoutWeight_kg     2076
+        CEPSurface_m         0
+        CEP_m                700
+        CruiseAltitude_m     0
+        Diameter_m           0.88
+        GUID                 hsfw-dataweapon-00000000000921
+        LaunchSpeedMax_mps   0
+        Length_m             11.2
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             80
+        PoK_Subsurface       0
+        PoK_Surface          0
+        Range_Air_km         0
+        Range_Land_km        300
+        Range_Subsurface_km  0
+        Range_Surface_km     0
+        Span_m               1.8
+        TargetSpeedMax_mps   0
+        WaypointNumber       0
+        Weight_kg            6400
+        fuel_source          burnout
+        世代                 1001
+        动力                 弹道
+        名称                 "SS-1C型“飞毛腿”地地弹道导弹[7万吨级核弹]"
+        国别                 全部
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000001073 : MISSILE_MOVER
+    note       "SS-1B型“飞毛腿”地地弹道导弹[8K14-8F44型，常规弹头]"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.18246 m2
+    fuel_mass  3824 kg
+    mass       5900 kg
+    attr
+        BurnoutWeight_kg     2076
+        CEPSurface_m         0
+        CEP_m                450
+        CruiseAltitude_m     0
+        Diameter_m           0.88
+        GUID                 hsfw-dataweapon-00000000001073
+        LaunchSpeedMax_mps   0
+        Length_m             11.25
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             75
+        PoK_Subsurface       0
+        PoK_Surface          0
+        Range_Air_km         0
+        Range_Land_km        160
+        Range_Subsurface_km  0
+        Range_Surface_km     0
+        Span_m               1.8
+        TargetSpeedMax_mps   0
+        WaypointNumber       0
+        Weight_kg            5900
+        fuel_source          burnout
+        世代                 1001
+        动力                 弹道
+        名称                 "SS-1B型“飞毛腿”地地弹道导弹[8K14-8F44型，常规弹头]"
+        国别                 "越南[1975 - ]"
+        服役止年             0
+        服役起年             1975
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000001131 : MISSILE_MOVER
+    note       "RGM-109C 战斧巡航导弹 Blk III"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.06371 m2
+    mass       1200 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         0
+        CEP_m                2
+        CruiseAltitude_m     60.9
+        Diameter_m           0.52
+        GUID                 hsfw-dataweapon-00000000001131
+        LaunchSpeedMax_mps   0
+        Length_m             6.2
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             90
+        PoK_Subsurface       0
+        PoK_Surface          0
+        Range_Air_km         0
+        Range_Land_km        1000
+        Range_Subsurface_km  0
+        Range_Surface_km     0
+        Span_m               2.6
+        TargetSpeedMax_mps   0
+        WaypointNumber       20
+        Weight_kg            1200
+        世代                 1001
+        动力                 巡航
+        名称                 "RGM-109C 战斧巡航导弹 Blk III"
+        国别                 全部
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000001183 : MISSILE_MOVER
+    note       "UGM-84L鱼叉型潜射反舰导弹"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.02724 m2
+    fuel_mass  104.5 kg
+    mass       522 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         4
+        CEP_m                4
+        CruiseAltitude_m     9.1
+        Diameter_m           0.34
+        GUID                 hsfw-dataweapon-00000000001183
+        LaunchSpeedMax_mps   0
+        Length_m             3.8
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             95
+        PoK_Subsurface       0
+        PoK_Surface          95
+        Range_Air_km         0
+        Range_Land_km        75
+        Range_Subsurface_km  0
+        Range_Surface_km     75
+        Span_m               0.9
+        TargetSpeedMax_mps   0
+        WaypointNumber       6
+        Weight_kg            522
+        fuel_source          range
+        世代                 1001
+        动力                 巡航
+        反推_CdA_m2          0.02724
+        反推_Isp_s           293
+        反推_射程km          75
+        名称                 UGM-84L鱼叉型潜射反舰导弹
+        国别                 日本
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000001189 : MISSILE_MOVER
+    note       "“鱼叉”潜射反舰导弹"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.02724 m2
+    fuel_mass  104.5 kg
+    mass       522 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         4
+        CEP_m                0
+        CruiseAltitude_m     9.1
+        Diameter_m           0.34
+        GUID                 hsfw-dataweapon-00000000001189
+        LaunchSpeedMax_mps   0
+        Length_m             3.8
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             0
+        PoK_Subsurface       0
+        PoK_Surface          90
+        Range_Air_km         0
+        Range_Land_km        0
+        Range_Subsurface_km  0
+        Range_Surface_km     75
+        Span_m               0.9
+        TargetSpeedMax_mps   0
+        WaypointNumber       6
+        Weight_kg            522
+        fuel_source          range
+        世代                 1001
+        动力                 巡航
+        反推_CdA_m2          0.02724
+        反推_Isp_s           293
+        反推_射程km          75
+        名称                 "“鱼叉”潜射反舰导弹"
+        国别                 日本
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000001191 : MISSILE_MOVER
+    note       "“鱼叉”中程反舰导弹"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.02724 m2
+    fuel_mass  90.6 kg
+    mass       522 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         4
+        CEP_m                0
+        CruiseAltitude_m     9.1
+        Diameter_m           0.34
+        GUID                 hsfw-dataweapon-00000000001191
+        LaunchSpeedMax_mps   0
+        Length_m             3.8
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             0
+        PoK_Subsurface       0
+        PoK_Surface          85
+        Range_Air_km         0
+        Range_Land_km        0
+        Range_Subsurface_km  0
+        Range_Surface_km     65
+        Span_m               0.9
+        TargetSpeedMax_mps   0
+        WaypointNumber       6
+        Weight_kg            522
+        fuel_source          range
+        世代                 1001
+        动力                 巡航
+        反推_CdA_m2          0.02724
+        反推_Isp_s           293
+        反推_射程km          65
+        名称                 "“鱼叉”中程反舰导弹"
+        国别                 全部
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000001297 : MISSILE_MOVER
+    note       "SS-1C型“飞毛腿”地地弹道导弹[子母弹]"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.18246 m2
+    fuel_mass  4324 kg
+    mass       6400 kg
+    attr
+        BurnoutWeight_kg     2076
+        CEPSurface_m         0
+        CEP_m                700
+        CruiseAltitude_m     0
+        Diameter_m           0.88
+        GUID                 hsfw-dataweapon-00000000001297
+        LaunchSpeedMax_mps   0
+        Length_m             11.2
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             80
+        PoK_Subsurface       0
+        PoK_Surface          0
+        Range_Air_km         0
+        Range_Land_km        300
+        Range_Subsurface_km  0
+        Range_Surface_km     0
+        Span_m               1.8
+        TargetSpeedMax_mps   0
+        WaypointNumber       0
+        Weight_kg            6400
+        fuel_source          burnout
+        世代                 1001
+        动力                 弹道
+        名称                 "SS-1C型“飞毛腿”地地弹道导弹[子母弹]"
+        国别                 全部
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000001611 : MISSILE_MOVER
+    note       "RGM-84D“鱼叉”潜射反舰导弹"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.02724 m2
+    fuel_mass  104.5 kg
+    mass       522 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         4
+        CEP_m                0
+        CruiseAltitude_m     9.1
+        Diameter_m           0.34
+        GUID                 hsfw-dataweapon-00000000001611
+        LaunchSpeedMax_mps   0
+        Length_m             3.8
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             0
+        PoK_Subsurface       0
+        PoK_Surface          90
+        Range_Air_km         0
+        Range_Land_km        0
+        Range_Subsurface_km  0
+        Range_Surface_km     75
+        Span_m               0.9
+        TargetSpeedMax_mps   0
+        WaypointNumber       6
+        Weight_kg            522
+        fuel_source          range
+        世代                 1001
+        动力                 巡航
+        反推_CdA_m2          0.02724
+        反推_Isp_s           293
+        反推_射程km          75
+        名称                 "RGM-84D“鱼叉”潜射反舰导弹"
+        国别                 全部
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000001612 : MISSILE_MOVER
+    note       "岸舰型“鱼叉”反舰导弹"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.02724 m2
+    fuel_mass  90.6 kg
+    mass       522 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         4
+        CEP_m                0
+        CruiseAltitude_m     54.8
+        Diameter_m           0.34
+        GUID                 hsfw-dataweapon-00000000001612
+        LaunchSpeedMax_mps   0
+        Length_m             3.8
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             0
+        PoK_Subsurface       0
+        PoK_Surface          85
+        Range_Air_km         0
+        Range_Land_km        0
+        Range_Subsurface_km  0
+        Range_Surface_km     65
+        Span_m               0.9
+        TargetSpeedMax_mps   0
+        WaypointNumber       6
+        Weight_kg            522
+        fuel_source          range
+        世代                 1001
+        动力                 巡航
+        反推_CdA_m2          0.02724
+        反推_Isp_s           293
+        反推_射程km          65
+        名称                 "岸舰型“鱼叉”反舰导弹"
+        国别                 全部
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000001615 : MISSILE_MOVER
+    note       "RGM-84C 型“鱼叉IB”反舰导弹"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.02724 m2
+    fuel_mass  90.6 kg
+    mass       522 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         4
+        CEP_m                0
+        CruiseAltitude_m     9.1
+        Diameter_m           0.34
+        GUID                 hsfw-dataweapon-00000000001615
+        LaunchSpeedMax_mps   0
+        Length_m             3.8
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             0
+        PoK_Subsurface       0
+        PoK_Surface          85
+        Range_Air_km         0
+        Range_Land_km        0
+        Range_Subsurface_km  0
+        Range_Surface_km     65
+        Span_m               0.9
+        TargetSpeedMax_mps   0
+        WaypointNumber       6
+        Weight_kg            522
+        fuel_source          range
+        世代                 1001
+        动力                 巡航
+        反推_CdA_m2          0.02724
+        反推_Isp_s           293
+        反推_射程km          65
+        名称                 "RGM-84C 型“鱼叉IB”反舰导弹"
+        国别                 日本
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000001629 : MISSILE_MOVER
+    note       "潜舰型“鱼叉”反舰导弹"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.02724 m2
+    fuel_mass  90.6 kg
+    mass       522 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         4
+        CEP_m                0
+        CruiseAltitude_m     54.8
+        Diameter_m           0.34
+        GUID                 hsfw-dataweapon-00000000001629
+        LaunchSpeedMax_mps   0
+        Length_m             3.8
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             0
+        PoK_Subsurface       0
+        PoK_Surface          85
+        Range_Air_km         0
+        Range_Land_km        0
+        Range_Subsurface_km  0
+        Range_Surface_km     65
+        Span_m               0.9
+        TargetSpeedMax_mps   0
+        WaypointNumber       6
+        Weight_kg            522
+        fuel_source          range
+        世代                 1001
+        动力                 巡航
+        反推_CdA_m2          0.02724
+        反推_Isp_s           293
+        反推_射程km          65
+        名称                 "潜舰型“鱼叉”反舰导弹"
+        国别                 全部
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000001766 : MISSILE_MOVER
+    note       "AGM-84C型“鱼叉”反舰导弹"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.02724 m2
+    fuel_mass  90.6 kg
+    mass       522 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         4
+        CEP_m                0
+        CruiseAltitude_m     9.1
+        Diameter_m           0.34
+        GUID                 hsfw-dataweapon-00000000001766
+        LaunchSpeedMax_mps   0
+        Length_m             3.8
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             0
+        PoK_Subsurface       0
+        PoK_Surface          85
+        Range_Air_km         0
+        Range_Land_km        0
+        Range_Subsurface_km  0
+        Range_Surface_km     65
+        Span_m               0.9
+        TargetSpeedMax_mps   0
+        WaypointNumber       0
+        Weight_kg            522
+        fuel_source          range
+        世代                 1001
+        动力                 巡航
+        反推_CdA_m2          0.02724
+        反推_Isp_s           293
+        反推_射程km          65
+        名称                 "AGM-84C型“鱼叉”反舰导弹"
+        国别                 美国
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000001840 : MISSILE_MOVER
+    note       "AGM-84D型“鱼叉”反舰导弹"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.02724 m2
+    fuel_mass  104.5 kg
+    mass       522 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         4
+        CEP_m                0
+        CruiseAltitude_m     9.1
+        Diameter_m           0.34
+        GUID                 hsfw-dataweapon-00000000001840
+        LaunchSpeedMax_mps   0
+        Length_m             3.8
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             0
+        PoK_Subsurface       0
+        PoK_Surface          90
+        Range_Air_km         0
+        Range_Land_km        0
+        Range_Subsurface_km  0
+        Range_Surface_km     75
+        Span_m               0.9
+        TargetSpeedMax_mps   0
+        WaypointNumber       0
+        Weight_kg            522
+        fuel_source          range
+        世代                 1001
+        动力                 巡航
+        反推_CdA_m2          0.02724
+        反推_Isp_s           293
+        反推_射程km          75
+        名称                 "AGM-84D型“鱼叉”反舰导弹"
+        国别                 美国
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000002941 : MISSILE_MOVER
+    note       "RGM-109I 战斧式巡航导弹 Blk IV MMT [多任务型]"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.06371 m2
+    mass       1200 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         2
+        CEP_m                2
+        CruiseAltitude_m     18.2
+        Diameter_m           0.52
+        GUID                 hsfw-dataweapon-00000000002941
+        LaunchSpeedMax_mps   0
+        Length_m             6.2
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             95
+        PoK_Subsurface       0
+        PoK_Surface          95
+        Range_Air_km         0
+        Range_Land_km        1600
+        Range_Subsurface_km  0
+        Range_Surface_km     1600
+        Span_m               2.6
+        TargetSpeedMax_mps   0
+        WaypointNumber       20
+        Weight_kg            1200
+        世代                 1001
+        动力                 巡航
+        名称                 "RGM-109I 战斧式巡航导弹 Blk IV MMT [多任务型]"
+        国别                 全部
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000002942 : MISSILE_MOVER
+    note       "UGM-109I战斧IV反舰导弹[多任务]"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.06371 m2
+    mass       1200 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         2
+        CEP_m                2
+        CruiseAltitude_m     18.2
+        Diameter_m           0.52
+        GUID                 hsfw-dataweapon-00000000002942
+        LaunchSpeedMax_mps   0
+        Length_m             6.2
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             95
+        PoK_Subsurface       0
+        PoK_Surface          95
+        Range_Air_km         0
+        Range_Land_km        1600
+        Range_Subsurface_km  0
+        Range_Surface_km     1600
+        Span_m               2.6
+        TargetSpeedMax_mps   0
+        WaypointNumber       20
+        Weight_kg            1200
+        世代                 1001
+        动力                 巡航
+        名称                 "UGM-109I战斧IV反舰导弹[多任务]"
+        国别                 全部
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000002943 : MISSILE_MOVER
+    note       "UGM-109I战斧IV反舰导弹[多任务]"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.06371 m2
+    mass       1200 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         2
+        CEP_m                2
+        CruiseAltitude_m     18.2
+        Diameter_m           0.52
+        GUID                 hsfw-dataweapon-00000000002943
+        LaunchSpeedMax_mps   0
+        Length_m             6.2
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             95
+        PoK_Subsurface       0
+        PoK_Surface          95
+        Range_Air_km         0
+        Range_Land_km        1600
+        Range_Subsurface_km  0
+        Range_Surface_km     1600
+        Span_m               2.6
+        TargetSpeedMax_mps   0
+        WaypointNumber       20
+        Weight_kg            1200
+        世代                 1001
+        动力                 巡航
+        名称                 "UGM-109I战斧IV反舰导弹[多任务]"
+        国别                 全部
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000002995 : MISSILE_MOVER
+    note       "SS-1B型“飞毛腿”地地弹道导弹[常规弹头]"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.18246 m2
+    fuel_mass  3824 kg
+    mass       5900 kg
+    attr
+        BurnoutWeight_kg     2076
+        CEPSurface_m         0
+        CEP_m                450
+        CruiseAltitude_m     0
+        Diameter_m           0.88
+        GUID                 hsfw-dataweapon-00000000002995
+        LaunchSpeedMax_mps   0
+        Length_m             11.25
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             75
+        PoK_Subsurface       0
+        PoK_Surface          0
+        Range_Air_km         0
+        Range_Land_km        245
+        Range_Subsurface_km  0
+        Range_Surface_km     0
+        Span_m               1.8
+        TargetSpeedMax_mps   0
+        WaypointNumber       0
+        Weight_kg            5900
+        fuel_source          burnout
+        世代                 1001
+        动力                 弹道
+        名称                 "SS-1B型“飞毛腿”地地弹道导弹[常规弹头]"
+        国别                 全部
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000003331 : MISSILE_MOVER
+    note       "RGM-109D战斧式巡航导弹Blk II常规对地攻击子弹药导弹[Kit-2碳丝]"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.06371 m2
+    mass       1200 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         0
+        CEP_m                10
+        CruiseAltitude_m     60.9
+        Diameter_m           0.52
+        GUID                 hsfw-dataweapon-00000000003331
+        LaunchSpeedMax_mps   0
+        Length_m             6.2
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             85
+        PoK_Subsurface       0
+        PoK_Surface          0
+        Range_Air_km         0
+        Range_Land_km        460
+        Range_Subsurface_km  0
+        Range_Surface_km     0
+        Span_m               2.6
+        TargetSpeedMax_mps   0
+        WaypointNumber       20
+        Weight_kg            1200
+        世代                 1001
+        动力                 巡航
+        名称                 "RGM-109D战斧式巡航导弹Blk II常规对地攻击子弹药导弹[Kit-2碳丝]"
+        国别                 全部
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000000003360 : MISSILE_MOVER
+    note       "AGM-84N型“鱼叉”反舰导弹"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.02724 m2
+    fuel_mass  104.5 kg
+    mass       522 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         4
+        CEP_m                4
+        CruiseAltitude_m     9.1
+        Diameter_m           0.34
+        GUID                 hsfw-dataweapon-00000000003360
+        LaunchSpeedMax_mps   0
+        Length_m             3.8
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             95
+        PoK_Subsurface       0
+        PoK_Surface          95
+        Range_Air_km         0
+        Range_Land_km        75
+        Range_Subsurface_km  0
+        Range_Surface_km     75
+        Span_m               0.9
+        TargetSpeedMax_mps   0
+        WaypointNumber       0
+        Weight_kg            522
+        fuel_source          range
+        世代                 1001
+        动力                 巡航
+        反推_CdA_m2          0.02724
+        反推_Isp_s           293
+        反推_射程km          75
+        名称                 "AGM-84N型“鱼叉”反舰导弹"
+        国别                 美国
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000001003602 : MISSILE_MOVER
+    note       "AGM-84N型“鱼叉”反舰导弹"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.02724 m2
+    fuel_mass  104.5 kg
+    mass       522 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         4
+        CEP_m                4
+        CruiseAltitude_m     9.1
+        Diameter_m           0.34
+        GUID                 hsfw-dataweapon-00000001003602
+        LaunchSpeedMax_mps   0
+        Length_m             3.8
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             95
+        PoK_Subsurface       0
+        PoK_Surface          95
+        Range_Air_km         0
+        Range_Land_km        75
+        Range_Subsurface_km  0
+        Range_Surface_km     75
+        Span_m               0.9
+        TargetSpeedMax_mps   0
+        WaypointNumber       0
+        Weight_kg            522
+        fuel_source          range
+        世代                 1001
+        动力                 巡航
+        反推_CdA_m2          0.02724
+        反推_Isp_s           293
+        反推_射程km          75
+        名称                 "AGM-84N型“鱼叉”反舰导弹"
+        国别                 美国
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000001003659 : MISSILE_MOVER
+    note       "AGM-84A型“鱼叉”反舰导弹"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.02724 m2
+    fuel_mass  90.6 kg
+    mass       522 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         4
+        CEP_m                0
+        CruiseAltitude_m     54.8
+        Diameter_m           0.34
+        GUID                 hsfw-dataweapon-00000001003659
+        LaunchSpeedMax_mps   0
+        Length_m             3.8
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             0
+        PoK_Subsurface       0
+        PoK_Surface          85
+        Range_Air_km         0
+        Range_Land_km        0
+        Range_Subsurface_km  0
+        Range_Surface_km     65
+        Span_m               0.9
+        TargetSpeedMax_mps   0
+        WaypointNumber       0
+        Weight_kg            522
+        fuel_source          range
+        世代                 1001
+        动力                 巡航
+        反推_CdA_m2          0.02724
+        反推_Isp_s           293
+        反推_射程km          65
+        名称                 "AGM-84A型“鱼叉”反舰导弹"
+        国别                 美国
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type MOZI_W_000001003678 : MISSILE_MOVER
+    note       "RGM-109C 战斧式巡航导弹 Blk II TLAM-C"
+    source     "墨子·未来指挥官数据库（经 Military-KG 导出；第三方推演软件数据，非实测）"
+    drag_area  0.06371 m2
+    mass       1200 kg
+    attr
+        BurnoutWeight_kg     0
+        CEPSurface_m         0
+        CEP_m                10
+        CruiseAltitude_m     60.9
+        Diameter_m           0.52
+        GUID                 hsfw-dataweapon-00000001003678
+        LaunchSpeedMax_mps   0
+        Length_m             6.2
+        MaxFlightTime_s      0
+        PoK_Air              0
+        PoK_Land             85
+        PoK_Subsurface       0
+        PoK_Surface          0
+        Range_Air_km         0
+        Range_Land_km        675
+        Range_Subsurface_km  0
+        Range_Surface_km     0
+        Span_m               2.6
+        TargetSpeedMax_mps   0
+        WaypointNumber       20
+        Weight_kg            1200
+        世代                 1001
+        动力                 巡航
+        名称                 "RGM-109C 战斧式巡航导弹 Blk II TLAM-C"
+        国别                 美国
+        服役止年             0
+        服役起年             0
+        类别                 制导武器
+    end_attr
+end_component_type
+
+component_type RADAR_HR-76 : HEX_SEARCH_RADAR
+    note          "HR-76"
+    source        "radartutorial（经 Military-KG 导出；公开资料汇总，非实测）"
+    detect_range  40 km
+    attr
+        beamwidth_raw           "2.7º"
+        frequency               I-Band
+        instrumented_range_raw  "40 km"
+        peak_power_raw          "250 kW"
+        prf_raw                 "1000…3000 Hz"
+        pulsewidth_raw          "0.25; 0.5 or 1 µs"
+        名称                    HR-76
+    end_attr
+end_component_type
+
+component_type RADAR_JY-14 : HEX_SEARCH_RADAR
+    note           "JY-14"
+    source         "radartutorial（经 Military-KG 导出；公开资料汇总，非实测）"
+    detect_range   600 km
+    scan_interval  10 s
+    attr
+        MTBCF_raw               "> 4150 h"
+        MTTR_raw                "< 0,5 h"
+        accuracy_raw            "±90 m,β= ±0.2°, altit.: ±400 m"
+        antenna_rotation_raw    "6 rpm"
+        beamwidth_raw           "β= 0.9°, ε= 20°"
+        frequency               "1,850 … 2,150 MHz ( D/E-Band) 2,300 … 2,500 MHz ( E-Band) 2,700 … 3,400 MHz ( E/F-Band)"
+        instrumented_range_raw  "390 NM (≙ 600 km)"
+        range_resolution_raw    "300 m"
+        名称                    JY-14
+    end_attr
+end_component_type
+
+component_type RADAR_W-160 : HEX_SEARCH_RADAR
+    note          "W-160"
+    source        "radartutorial（经 Military-KG 导出；公开资料汇总，非实测）"
+    detect_range  75 km
+    attr
+        MTBCF_raw               "600 hrs"
+        antenna_rotation_raw    "15, 20 and 25 min-1"
+        beamwidth_raw           "1.8°"
+        frequency               "9.7…9.9 GHz (I-Band)"
+        instrumented_range_raw  "75 km"
+        peak_power_raw          "16 kW"
+        prf_raw                 "1560…125000 Hz"
+        pulsewidth_raw          "0.25 or 8 µs"
+        名称                    W-160
+    end_attr
+end_component_type

@@ -1,0 +1,201 @@
+# AFSIM kinematic_mover demo 的 milsim 复现（对照见同目录 README.md）
+#
+# 原脚本：demos/kinematic_mover/kinematic_mover_demo.txt（AFSIM 2.9.0-v1.0 汉化版）。
+# 原 demo 的说明（doc/kinematic_mover.rst）只有三句，但三句都是要紧的：
+#
+#   "This demo has three platforms using the same route (just offset from each
+#    other) but have different limits using the kinematic mover.  Flyer4 is the
+#    same as Flyer3 but uses the WSF_AIR_MOVER to illustrate the difference
+#    between the AIR MOVER vs the KINEMATIC MOVER."
+#   "Keep in mind that the KINEMATIC MOVER calculates acceleration in the
+#    vertical plane whereas the AIR MOVER does not (only in the horizontal
+#    plane)."
+#
+# 所以这份复现要讲的是两件事，**不是**一条：
+#
+#   甲、同一条航线、同一个件，**三组限制**（过载 4.0/2.2/2.2 g、转向
+#       65/50/120 °/s）分别把轨迹拉成什么样；
+#   乙、**垂向那一半**：AFSIM 把"平滑垂向过渡"与"垂向瞬变"分给了两个件
+#       （KINEMATIC_MOVER / AIR_MOVER）。我们没有两个空中件，只有一个
+#       AIR_MOVER，于是这件事落在**参数**上——`vertical_accel` 与
+#       `climb_rate`/`descent_rate`：
+#         · 运动学式（flyer1~3）：速率限得很松、加速度按 linear_accel 给
+#           ⇒ 高度按加速度建立，是连续的；
+#         · 气动式（flyer4）：加速度给到极大、速率也放大
+#           ⇒ 指令一到高度就走，等于 AFSIM 那句"垂向不算加速度"。
+#
+# 这是复现里**唯一一处"用参数代两个件"**的地方，其余全是逐项对照（见 README
+# 的参数映射表）。它不是技巧：§5.7.11 定的就是"三通道 × 两层"，垂向的
+# 第二层本来就是给这种差别留的位置。
+#
+# 参数来源逐条写在下面，g 一律按 9.80665 换算。
+#
+# 两条**已知差异**先说在前面，免得看对照图时把它们当成 bug：
+#   1. 原 demo 每个航路点带自己的速度（180~300 kts）。我们的空中件只有
+#      一个 `max_speed`，没有"GoToSpeed / 航路点速度"这条命令。这里取
+#      210 kts（原件的 target_speed）当全程速率。
+#   2. 原 demo 挂了个 VARY_DIR_ALT 处理器，在 t≈30/110/210 s 上分别下
+#      "在当前高度上再加 20000 m / 降到 4000 m / 回到航线"。我们的模型里
+#      没有 `GoToAltitude`（保持航线）这条命令，驱动脚本用**改当前这一腿的
+#      目标高度**来等效它（同一条水平航路、换一个高度目标），并在 t≈210 s
+#      把高度交还给航线。这是**等价改写不是新增能力**，见 README。
+
+simulation
+    name     "AFSIM kinematic_mover 复现"
+    # 0.1 s：原 demo 的 update_interval 就是 0.1 sec。**采样粒度与模型的节拍
+    # 要一起对齐**——只对齐一边，量出来的"转弯快慢"里就混着采样间隔的差别。
+    max_step 0.1 s
+    seed     20260920
+end_simulation
+
+# 战区锚点取在两条 demo 航线中间（佐治亚州北部）。半径 60 km 是为了同时
+# 罩住 aircraft_mover 那份的 DIVE 航线（它有向西 23 km、向东 31 km 的两端）。
+zone DEMO_AREA
+    anchor     34.0 -83.17
+    radius     60 km
+    resolution 1 km
+    layers     1
+end_zone
+
+# ---- 组件型号 -----------------------------------------------------------
+#
+# 空块 = 把代码层的 AIR_MOVER 引进类型表；`:` 后面只能写已声明的类型。
+component_type AIR_MOVER
+end_component_type
+
+# 三组限制的来源（原 demo 的 mover 块，逐条对应）：
+#
+#             maximum_linear  maximum_radial   maximum_body_turn   body_roll
+#              _acceleration   _acceleration        _rate             _rate
+#   flyer1        1.4 g          4.0 g          65 deg/sec       80 deg/sec
+#   flyer2        1.4 g          2.2 g          50 deg/sec       45 deg/sec
+#   flyer3        1.4 g          2.2 g         120 deg/sec       90 deg/sec
+#   flyer4        1.4 g          2.2 g          50 deg/sec      （气动件）
+#
+# 映射（`turn_rate` 与 `radial_accel` 两项**取小**，正是 §5.7.11 里那个
+# ω_max(v) = min(turn_rate, radial_accel / v)）：
+#
+#   maximum_body_turn_rate      → turn_rate      （直接照抄，单位同为 deg/s）
+#   maximum_radial_acceleration → radial_accel    （同为"横向加速度上限"，
+#                                 ω = a/v ⇒ R = v²/a，两边是同一个量）
+#   maximum_linear_acceleration → linear_accel    （同为前向加速度上限）
+#   body_roll_rate              → angular_accel   （**只作量级代理**：AFSIM 的
+#                                 转向建立由滚转率带出来，我们的第二层是
+#                                 直接的角加速度上限，两者不是同一个量，
+#                                 所以按同数量级取，不假装等价）
+component_type KIN_F1 : AIR_MOVER
+    max_speed      108 m/s
+    turn_rate       65 deg/s
+    radial_accel    39.2 m/s2
+    linear_accel    13.7 m/s2
+    angular_accel   80 deg/s2
+    vertical_accel  13.7 m/s2
+    # 运动学式的垂向：**航线本身要多少就给多少**，形状由 vertical_accel 给。
+    # 100 m/s 这个数取自原脚本自己声明的 `MaxRate = 100`（就在 GoToAltitude
+    # 那几行上面）；实测参照在 GoToAltitude 之后的等效垂向速率是 84 m/s，
+    # 而航线几何要求的最大下降率是 76 m/s —— 都在这条线以下，所以它**不成为
+    # 瓶颈**，垂向的形状完全由 vertical_accel 决定。写 200 也一样，但那样
+    # 就与脚本里那个数字无关了。
+    climb_rate     100 m/s
+    descent_rate   100 m/s
+    cruise_altitude 10000 m
+    period 0.1 s
+end_component_type
+
+component_type KIN_F2 : AIR_MOVER
+    max_speed      108 m/s
+    turn_rate       50 deg/s
+    radial_accel    21.6 m/s2
+    linear_accel    13.7 m/s2
+    angular_accel   45 deg/s2
+    vertical_accel  13.7 m/s2
+    climb_rate     100 m/s
+    descent_rate   100 m/s
+    cruise_altitude 10000 m
+    period 0.1 s
+end_component_type
+
+component_type KIN_F3 : AIR_MOVER
+    max_speed      108 m/s
+    turn_rate      120 deg/s
+    radial_accel    21.6 m/s2
+    linear_accel    13.7 m/s2
+    angular_accel   90 deg/s2
+    vertical_accel  13.7 m/s2
+    climb_rate     100 m/s
+    descent_rate   100 m/s
+    cruise_altitude 10000 m
+    period 0.1 s
+end_component_type
+
+# flyer4：参数与 flyer3 同源（AFSIM 说"the same as Flyer3"），但垂向换成
+# 气动件的口径——**加速度那一层不参与**。垂向速率也一并放大：原 demo 里
+# flyer4 在 0.1 s 内掉了 8 m（80 m/s），比 flyer1~3 的平滑爬升快一个量级。
+component_type AIR_F4 : AIR_MOVER
+    max_speed      108 m/s
+    turn_rate       50 deg/s
+    radial_accel    21.6 m/s2
+    linear_accel    13.7 m/s2
+    angular_accel   45 deg/s2
+    vertical_accel  1000 m/s2
+    climb_rate     100 m/s
+    descent_rate   100 m/s
+    cruise_altitude 10000 m
+    period 0.1 s
+end_component_type
+
+# ---- 平台类型 -----------------------------------------------------------
+
+platform_type FLYER_1
+    side blue
+    component mover KIN_F1
+    end_component
+end_platform_type
+
+platform_type FLYER_2
+    side blue
+    component mover KIN_F2
+    end_component
+end_platform_type
+
+platform_type FLYER_3
+    side blue
+    component mover KIN_F3
+    end_component
+end_platform_type
+
+platform_type FLYER_4
+    side blue
+    component mover AIR_F4
+    end_component
+end_platform_type
+
+# ---- 实例 --------------------------------------------------------------
+#
+# 只写位置：**初始高度与初速由驱动脚本写入**（`tools/demo_afsim_mover.py`）。
+# 想定语言里没有"初始高度"这条（§9-22：hex 落格的 z 恒为 0），而原 demo
+# 是从 32808.40 ft（10000 m）起步的——不写进去，前 250 s 会是一段
+# "从海平面爬到 10000 m"，两边一比就全是这一段，看不到转向的差别。
+# 航向同理：原 demo 是 `heading 215 deg`。
+#
+# 坐标是原 demo 的第一点，逐字照抄。
+
+platform flyer1 FLYER_1
+    position latlng 33.9124 -83.3380
+    heading  215 deg
+end_platform
+
+platform flyer2 FLYER_2
+    position latlng 33.9716 -83.2446
+    heading  215 deg
+end_platform
+
+platform flyer3 FLYER_3
+    position latlng 34.0015 -83.2147
+    heading  215 deg
+end_platform
+
+platform flyer4 FLYER_4
+    position latlng 34.0015 -83.2147
+    heading  215 deg
+end_platform

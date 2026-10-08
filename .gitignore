@@ -1,0 +1,25 @@
+__pycache__/
+*.py[cod]
+*$py.class
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+.venv/
+venv/
+env/
+
+build/
+dist/
+*.egg-info/
+
+.vscode/
+.idea/
+
+# AI 助手工作数据目录，不入库
+.workbuddy/
+
+*.log

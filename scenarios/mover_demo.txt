@@ -1,0 +1,329 @@
+# 机动演示：轮式绕山 / 履带直穿 / 空中直线 / 船按吃水挑水路 / 潜艇定深潜航（§5.7）
+#
+# 这份想定**不写初始机动命令**——目的地是运行期下达的东西（一条任务 /
+# 一条指令），属 M5a 的台账。tools/demo_mover.py 装配完成之后手工下达，
+# 这样"想定里的初始条件"与"推演中的命令"不会有两处真相。
+#
+# 它也演示**通行门槛**（§5.7.9）：可通行能力是这辆车的参数，不是地貌的
+# 属性。同一片山，履带直穿、轮式得绕出去几倍的路——两辆车是同一个组件
+# 类，差别全在 `blocked_terrain` 上。
+#
+# 地形种子 31 是挑过的：**整片生成之后**实测水域 13.5%、平原 25.6%、
+# 林地 1.4%、丘陵 35.6%、山地 24.0%，有山有水可绕。换成别的种子可能整块
+# 落在水里——程序化地形的特征尺度是 15 km，而战区 60 km，所以局部海陆比
+# 可以离声明的 34% 很远（见 §9-17）。
+#
+# ⚠️ 这里原先写的是"水域 5.8%"——那是**没预热**时统计出来的数：没生成的格
+# 读到的是通道默认值（水域、海平面、水深 0），统计的是生成进度而不是地形。
+# 同一个坑把 §9-17 的水域占比也测错过一次，见 §9-18。
+
+simulation
+    name     "机动演示"
+    max_step 2 s
+    seed     20260919
+end_simulation
+
+# ---- 组件型号：只改参数，算法继承框架的参考实现 ------------------------
+#
+# 先声明**同名空块**把代码层的类引进类型表，再派生型号。`: ` 后面只能写
+# "已声明的类型"，不能直接写 @register_component("GROUND_MOVER") 的类名
+# ——那是一个在类型表里不存在的名字（§5.5.4 ①）。空块本身不带参数。
+#
+# **轮式与履带的差别不只是快慢**（§5.7）：轮式跑得快但上不了山地，履带
+# 慢却能越野。这不是两个组件类，是同一个 GROUND_MOVER 的两组参数——
+# "能过哪些地貌"是这辆车的属性（blocked_terrain），不是地貌自己的属性。
+# 想定里写的是**地貌名字**不是编号：名字写错当场报错并给拼写建议，
+# 编号写错不会报错，只会表现为"这条门槛没生效"。
+
+component_type GROUND_MOVER
+end_component_type
+
+component_type AIR_MOVER
+end_component_type
+
+component_type WATER_MOVER
+end_component_type
+
+component_type SUBSURFACE_MOVER
+end_component_type
+
+# `turn_rate` 是三自由度里的第二个自由度（§5.7.11）：航向不是瞬变的，
+# 转弯半径 = 速率 ÷ 角速度。25 m/s ÷ (12 °/s) ≈ 119 m——车辆量级。
+component_type MOVER_WHEELED : GROUND_MOVER
+    max_speed       25 m/s
+    turn_rate       12 deg/s
+    blocked_terrain [山地]
+end_component_type
+
+# 履带不封任何地貌（blocked_terrain 留空 = 哪都能走），所以它能直穿山地。
+# 代价是慢：15 m/s。
+component_type MOVER_TRACKED : GROUND_MOVER
+    max_speed 15 m/s
+    # 履带能原地转向：转向速率比轮式高一个量级。15 m/s ÷ (40 °/s) ≈ 21 m。
+    turn_rate 40 deg/s
+end_component_type
+
+# 吃水是**这条船**的参数，不是水面画像的。陆地格的水深恒为 0，所以把
+# min_water_depth 设成正数的船**开不上岸**——那是定义，不是毛病。
+component_type SHIP_COASTAL : WATER_MOVER
+    max_speed       12 m/s
+    # 12 m/s ÷ (3 °/s) ≈ 229 m：船的转弯半径是百米量级，不是车辆那个量级。
+    turn_rate       3 deg/s
+    min_water_depth 8 m
+end_component_type
+
+# 水下的门槛**不是另写的一个数**：它由定深与离底余量算出来
+# （60 + 10 = 70 m）。所以这里没有 min_water_depth——写了也只能让它更严，
+# 不会让潜艇潜得比海底还深。两个速率分开写是因为上浮能吹除压载（快）、
+# 下潜只能注水（慢）。
+component_type SUB_NUCLEAR : SUBSURFACE_MOVER
+    max_speed      12 m/s
+    # 12 m/s ÷ (1 °/s) ≈ 690 m。潜艇是四件里转向最迟钝的——舵效随航速下降，
+    # 而艇体又长。这一条也是"把这是潜艇落到数字上"。
+    turn_rate      1 deg/s
+    cruise_depth   60 m
+    hull_clearance 10 m
+    dive_rate      2 m/s
+    surface_rate   4 m/s
+end_component_type
+
+# 飞机的转向能力**不由固定角速度说了算，由过载说了算**（§5.7.11）：
+# radial_accel 9.4 m/s² ≈ 0.96 g。角速度上界取两项之小——
+# ω_max(v) = min(turn_rate, radial_accel / v)：
+#
+#   v = 180 m/s（巡航）→ min(12, 2.99) = 2.99 °/s，转弯半径 3.45 km
+#   v =  45 m/s（进近）→ min(12, 11.97) = 11.97 °/s，转弯半径 215 m
+#
+# 低速端（v < 45 m/s）由 12 °/s 的机构上限兜底——a/v 在 v → 0 时发散，
+# 而那个点上离心力本来就是零。写 12 与 9.4 与框架默认一致，显式写出来
+# 是让"速度会变、能力不变"这一支在演示里看得见：同一个 a_rad 换了速度
+# 状态仍然可比，固定角速度则等于把过载上限藏进速度里。
+#
+# 后果是**进弯之前要减速**（几何限速给的，不是模型算错了），所以接近目的地
+# 时水平速度会明显掉下来。180 m/s 的转弯半径 3.45 km，那是物理。
+component_type AIR_FAST : AIR_MOVER
+    max_speed       180 m/s
+    turn_rate       12 deg/s
+    radial_accel    9.4 m/s2
+    cruise_altitude 4000 m
+end_component_type
+
+# ---- 弹：弹体 + 制导件，两个部件（§5.8）----------------------------------
+#
+# 弹是**两个部件**：弹体（`MissileMover`）管"能不能做到"（推力、燃料、过载、
+# 重力），制导件（`GuidanceComputer`）管"要往哪飞"（哪个阶段、什么高度、
+# 什么速率、什么时候算命中）。弹体每个子步叫制导件一次，制导件自己**没有**
+# 节拍——它要是按 0.02 s 注册一条周期事件，整个引擎的步长都会被它拉细。
+#
+# **轨迹形态不靠换运动器类，靠换阶段表。** 想定里认的是两个现成的制导件：
+#
+#   CRUISE_GUIDANCE     爬升 → 贴地 50 m 定高定速巡航 → 末段比例导引
+#   BALLISTIC_GUIDANCE  近垂直起飞 → 程序转弯到 50° → 关掉制导自由飞 → 末段
+#
+# 阶段表（`phases`）是**组件参数**、不是想定语法（想定语言只有"块 / 赋值"
+# 两条产生式，为它另开一门嵌套语法的收益抵不上解析器、语义层、读取三处
+# 各错一次的风险）。所以这份想定用的是两个参考实现自带的剧本，只调参数:
+# 打哪个目标、引信多近起爆、导引增益多大。要另一种剧本（别的巡航高度、
+# 别的转弯程序）就派生一个制导件类换掉默认表——"换一种弹 = 换一张表"。
+
+component_type MISSILE_MOVER
+end_component_type
+
+component_type CRUISE_GUIDANCE
+end_component_type
+
+component_type BALLISTIC_GUIDANCE
+end_component_type
+
+# 巡航弹：涡扇，推力只有重量的 0.14 倍（1.6 kN ÷ 1200 kg × g），所以
+# **launch_speed 非有不可**——那是载机投放或助推器交出来的初速。缺了它
+# 不是"飞得慢一点"，是**建立不起速度系**：弹会在发射位上把航向左右翻，
+# 烧掉燃料而位置几乎不动。所以它现在直接报错（§5.8）。
+#
+# `launch_fpa 20 deg` 也是**量出来的，不是配好看的**：这一发是从地面发射位
+# 打出去的，而地面不是平的。发射仰角写 0（水平出发）时，弹从地面起步、由
+# 高度环按指令慢慢爬到 150 m AGL，而它在爬上去之前就被前方**高出 14 m 的
+# 那片地**挡住了——实测 t = 2 s 就报"落地"，油一点没烧。给 20° 之后弹一出
+# 发射位就是抬着头的（垂向速率 82 m/s），第 116 s 命中，末端起爆 27 m 上下
+# （起爆距离是"第一个落进引信点火区的子步"的距离，总贴着 lethal_radius——
+# 具体值随采样落在哪一步变，见 §5.8.5）。载机投放写 0（题设里那份速度本来
+# 就带着载机的姿态）。
+component_type SSM_CRUISE : MISSILE_MOVER
+    mass              1200 kg
+    fuel_mass          250 kg
+    thrust             1.6 kN
+    specific_impulse  3000 s
+    drag_area          0.024 m2
+    radial_accel        12 m/s2
+    max_speed          300 m/s
+    launch_speed       240 m/s
+    launch_fpa          20 deg
+end_component_type
+
+# 弹道弹：固体火箭，垂直发射（launch_fpa 85°）。**射程由燃料决定，不由
+# "射程"参数决定**——想定里根本没有 range 这个参数：400 kg 燃料买来 50.7 km
+# 自由飞，末段比例导引再把它推到 85 km。
+component_type SSM_SRBM : MISSILE_MOVER
+    mass               800 kg
+    fuel_mass          400 kg
+    thrust              66 kN
+    specific_impulse   250 s
+    drag_area           0.09 m2
+    radial_accel        40 m/s2
+    max_speed         1500 m/s
+    launch_fpa          85 deg
+end_component_type
+
+# ---- 平台类型 -----------------------------------------------------------
+
+platform_type WHEELED_RECON
+    side red
+    component mover MOVER_WHEELED
+    end_component
+end_platform_type
+
+platform_type TRACKED_IFV
+    side red
+    component mover MOVER_TRACKED
+    end_component
+end_platform_type
+
+platform_type PATROL_BOAT
+    side blue
+    component mover SHIP_COASTAL
+    end_component
+end_platform_type
+
+platform_type SUBMARINE
+    side blue
+    component mover SUB_NUCLEAR
+    end_component
+end_platform_type
+
+platform_type JET
+    side blue
+    component mover AIR_FAST
+    end_component
+end_platform_type
+
+# 发射车：弹体 + 制导件两个槽。`target_name` 写的是**想定里的平台名**——
+# 写错会在装配期报错，不会变成"弹笔直飞向原点"（那与"打歪了"在结果里长得
+# 一模一样）。
+platform_type CRUISE_TEL
+    side red
+    component mover SSM_CRUISE
+    end_component
+    component guidance CRUISE_GUIDANCE
+        target_name   TGT_BOAT_1
+        lethal_radius 30 m
+    end_component
+end_platform_type
+
+platform_type SRBM_TEL
+    side red
+    component mover SSM_SRBM
+    end_component
+    component guidance BALLISTIC_GUIDANCE
+        target_name   TGT_BOAT_2
+        lethal_radius 30 m
+    end_component
+end_platform_type
+
+# 靶标就是**船**（水面件），不是"一个没有部件的点"：目标高度取实体自己的
+# z，而想定里平台落格时 z 恒为 0——只有水域上这个 0 是对的（那是海面），
+# 陆地上它会"埋"在地面以下（这片战区陆地高程 128~515 m），弹扑过去报的
+# 会是"落地"而不是"命中"。见 §9-22。
+
+# ---- 战区 ---------------------------------------------------------------
+
+zone EAST_SECTOR
+    anchor     39.9042 116.4074
+    radius     30 km
+    resolution 200 m
+    layers     1
+    terrain    procedural seed=31
+end_zone
+
+# ---- 五件装备：陆上三件同一出发点，船与潜艇各自放在水里 ----------------
+#
+# 船不能和车共用一个出发点：装卸点 `-24 0` 是丘陵，陆地格水深恒为 0，
+# 吃水 8 m 的船放在那里会**一步都动不了**（而且它是被自己的参数封死的，
+# 不是 bug）。所以给它一个真实的水域格。
+#
+# `-65 0` 是探过的：水深 13.7 m，够 8 m 吃水的船停；±16 格内 265 个水域格，
+# 它有 35 格去不了（水深不够，或被水深不够的格挡住）——正好能看出吃水
+# 门槛在起作用。`demo_mover.py` 的吃水一节把三种吃水摆在一起：265 / 230 / 0。
+#
+# 潜艇要的水柱 = 定深 60 m + 离底余量 10 m = 70 m，所以它得放在**深水**。
+# 这片战区的水下并不浅：整片生成之后，战区内水域 3658 格，水深中位数
+# 142 m、最深 587.8 m；够 70 m 门槛的有 2542 格，连成四片（2146 / 346 /
+# 48 / 2 格）。潜艇放在最大那片的西缘 `60 -10`（水深 169.0 m）。
+#
+# 它与船位隔了 115 格（约 23 km）：中间那片浅水对潜艇是**墙**（门槛按格判，
+# 13.7 m 到 169 m 之间没有过渡），所以两个域在这份想定里是分开的。
+#
+# 顺带记两个"差点写错"的地方：
+#
+# 一、"够深"不等于"能去"。船位往西 6 格，`-71 -5` 水深 88.1 m，看着够
+# 70 m 的门槛——可它被浅水围成了一个 **48 格的小坑**，核潜艇开进去就只有
+# 48 格可动。门槛判的是**格**，"这一格够深"与"这一片够深"是两回事。
+#
+# 二、统计地形之前**先把整片生成出来**。没生成的格读到的是默认值
+# （水域、海平面、水深 0），于是"这片战区的水下最深只有 88 m、整片浅海"
+# 这种结论看着有模有样，其实是生成进度而不是地形——同一份想定，整片
+# 生成之后最深是 587.8 m，差了一个数量级。见 §9 第 18 条。
+
+platform CAR_1 WHEELED_RECON
+    position hex -24 0 @ layer 0
+end_platform
+
+platform CAR_2 TRACKED_IFV
+    position hex -24 0 @ layer 0
+end_platform
+
+platform SHIP_1 PATROL_BOAT
+    position hex -65 0 @ layer 0
+end_platform
+
+platform SUB_1 SUBMARINE
+    position hex 60 -10 @ layer 0
+end_platform
+
+platform JET_1 JET
+    position hex -24 0 @ layer 0
+end_platform
+
+# ---- 弹与靶标 -----------------------------------------------------------
+#
+# 两个靶标都放在**水面**上：它们的 z 是 0，而水面格的海面就是 0（高程通道
+# 在水域放的是海床，`(94, -22)` 那格深 6.6 m）。放在陆地上会"埋"进地里，
+# 弹报"落地"而不是"命中"——原因见上面靶标那一段与 §9-22。
+#
+# **弹道弹那一发在战区的两个角上，距离 58.4 km**：战区只有 30 km 半径，
+# 两点尽量拉开也只有 58 km（那是这个战区能给出的最远一发）。这不是凑数——
+# 交接距离是 44 km，目标比它近的话 `BALLISTIC` 段会被**整段跳过**：先前把
+# 靶子放在 27 km 上，时间线里出现的是 `BALLISTIC(15~15s)`，也就是一个**没有
+# 弹道的弹道弹**。58 km 这一发里那一段才有几秒钟可看。战区半径决定射程上限，
+# 这是这一版"没有瞄准计算"的直接后果（§5.8）。
+#
+# 巡航弹走的是东边那条**缓降地形**（发射位 343 m，靶位 0 m）：贴地 50 m 的
+# 跟随没有前瞻（§5.8 的已知限制），前方若是抬升的山脊它来不及爬——这份想定
+# 让它的航路朝海，这也是为什么靶子放水面而不是放山上。
+
+platform TGT_BOAT_1 PATROL_BOAT
+    position hex 62 0 @ layer 0
+end_platform
+
+platform TGT_BOAT_2 PATROL_BOAT
+    position hex 94 -22 @ layer 0
+end_platform
+
+platform SSM_CRUISE_1 CRUISE_TEL
+    position hex -24 0 @ layer 0
+    heading  90 deg
+end_platform
+
+platform SRBM_1 SRBM_TEL
+    position hex -92 21 @ layer 0
+    heading  77 deg
+end_platform

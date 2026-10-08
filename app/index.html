@@ -1,0 +1,1505 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>milsim 态势回放</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --panel2: #1c2230;
+    --line: #2a3141;
+    --txt: #e6edf3;
+    --dim: #8b949e;
+    --red: #E24B4A;
+    --blue: #378ADD;
+    --amber: #E0A458;
+    --green: #3FB950;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: var(--bg); color: var(--txt);
+    font: 13px/1.5 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
+  #app { display: flex; height: 100vh; }
+
+  /* ---- 中栏：地图在上、控制条在下（上下两块**互为兄弟**，各自独立） ----
+     ★ 为什么要把控制条从地图里搬出来：腾讯 GL JS 会往 #map 容器里塞自己的
+       一整套定位控件（canvas 画布、版权/logo、比例尺…），并给容器建一个
+       **z-index 很高的层叠上下文**。控制条原先作为 #mapwrap 的子节点、和 #map
+       平级，两边就进了同一个层叠上下文比大小 —— 怎么调数值都赢不了 SDK。
+       更糟的是控制条自带 backdrop-filter，那会**自己再建一层层叠上下文**，
+       于是它的 z-index 只在自己内部生效，对外形同虚设。
+       现在把控制条改成 #stage 的兄弟节点（地图只占 stage，控制条独占底下一行），
+       两者**根本不在同一个层叠上下文里**，谁也别想压谁 —— 靠结构隔离，
+       不靠数值博弈。 */
+  #stage { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  /* ★ #mapwrap 只做几何容器，**底色交给地图画布自己**。
+     早先这里垫了一层深色（`#05070c`）想给"图还没到"的阶段兜底，
+     但后来画布背景也被刷成全透明 ⇒ 两者叠加 = 一片纯黑（用户看到的
+     "地图一片黑"）。现在画布背景保留 SDK 默认的不透明米白
+     （见 initMap 的 setBackgroundColor），这层兜底就没意义了，
+     留着反而在"图没到"时抢眼。 */
+  #mapwrap { position: relative; flex: 1; min-height: 0; min-width: 0; }
+  #map { width: 100%; height: 100%; }
+
+  /* ---- 左侧图层控制 ---- */
+  #side {
+    width: 236px; flex: 0 0 236px; background: var(--panel);
+    border-right: 1px solid var(--line); overflow-y: auto; padding: 10px;
+  }
+  #side h1 { font-size: 14px; margin: 2px 0 8px; }
+  #side h1 span { font-size: 11px; color: var(--dim); font-weight: 400; }
+  .grp { margin-bottom: 12px; }
+  .grp > .t { font-size: 11px; color: var(--dim); text-transform: uppercase;
+    letter-spacing: .06em; margin-bottom: 5px; }
+  label.chk { display: flex; align-items: center; gap: 6px; padding: 3px 4px;
+    border-radius: 4px; cursor: pointer; user-select: none; }
+  label.chk:hover { background: var(--panel2); }
+  label.chk input { accent-color: var(--blue); }
+  .sw { width: 10px; height: 10px; border-radius: 2px; flex: 0 0 10px; }
+  .sw.dash { border-radius: 0; height: 2px; margin-top: 4px; }
+
+  /* ---- 右侧信息 ---- */
+  #info {
+    width: 268px; flex: 0 0 268px; background: var(--panel);
+    border-left: 1px solid var(--line); overflow-y: auto; padding: 10px;
+  }
+  #info .t { font-size: 11px; color: var(--dim); text-transform: uppercase;
+    letter-spacing: .06em; margin: 10px 0 5px; }
+  #info .t:first-child { margin-top: 0; }
+  .kpi { display: flex; justify-content: space-between; padding: 3px 6px;
+    background: var(--panel2); border-radius: 4px; margin-bottom: 3px; }
+  .kpi b { font-weight: 600; font-variant-numeric: tabular-nums; }
+  ul.list { list-style: none; margin: 0; padding: 0; }
+  ul.list li { display: flex; justify-content: space-between; gap: 6px;
+    padding: 3px 6px; border-radius: 4px; font-variant-numeric: tabular-nums; }
+  ul.list li:nth-child(odd) { background: var(--panel2); }
+  ul.list li .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 7px; }
+  .tag { font-size: 10px; padding: 0 4px; border-radius: 3px;
+    background: #30363d; color: var(--dim); }
+  .muted { color: var(--dim); }
+
+  /* ---- 底部时间轴（#stage 的第二个子节点，与地图互不重叠） ---- */
+  /* ★ 不再需要 position:absolute / z-index / backdrop-filter：
+     它是正常流里的 flex 行，天然不跟地图抢位置，也就不存在被 SDK 压住的可能。
+     （曾经那组 z-index:10 + backdrop-filter 就是"播放键点不动"的根源。） */
+  #bottom {
+    flex: 0 0 auto;
+    background: var(--panel); border-top: 1px solid var(--line);
+    padding: 8px 12px 10px;
+  }
+  #ctl { display: flex; align-items: center; gap: 10px; }
+  button.btn {
+    background: var(--panel2); color: var(--txt); border: 1px solid var(--line);
+    border-radius: 5px; padding: 4px 11px; cursor: pointer; font-size: 13px;
+  }
+  button.btn:hover { border-color: #3d4657; }
+  button.btn.on { background: var(--blue); border-color: var(--blue); color: #fff; }
+  #clock { font-variant-numeric: tabular-nums; font-size: 13px;
+    min-width: 74px; font-weight: 600; }
+  #track { flex: 1; position: relative; height: 20px; display: flex; align-items: center; }
+  #slider { width: 100%; accent-color: var(--blue); cursor: pointer; }
+  #speedsel { background: var(--panel2); color: var(--txt);
+    border: 1px solid var(--line); border-radius: 5px; padding: 3px 6px; }
+
+  /* ---- 提示 / 错误 ---- */
+  #note { position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+    background: rgba(22,27,34,.95); border: 1px solid var(--line);
+    border-radius: 6px; padding: 7px 12px; font-size: 12px; max-width: 70%;
+    display: none; z-index: 20; }
+  #note.err { border-color: var(--red); color: #ffb3b3; }
+  #note.show { display: block; }
+
+  .hint { font-size: 11px; color: var(--dim); margin-top: 6px; line-height: 1.45; }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="side">
+    <h1>milsim 态势回放 <span id="fmt"></span></h1>
+
+    <div class="grp">
+      <div class="t">想定</div>
+      <select id="scen" style="width:100%;background:var(--panel2);color:var(--txt);
+              border:1px solid var(--line);border-radius:5px;padding:4px"></select>
+    </div>
+
+    <div class="grp">
+      <div class="t">数据源</div>
+      <label class="chk"><input type="radio" name="src" value="file" checked>
+        <span>本地回放文件</span></label>
+      <label class="chk"><input type="radio" name="src" value="fast">
+        <span>一键跑完 <span id="livedot_f" class="muted" style="font-size:11px">（需服务端）</span></span></label>
+      <label class="chk"><input type="radio" name="src" value="live">
+        <span>边跑边看 <span id="livedot_l" class="muted" style="font-size:11px">（需服务端）</span></span></label>
+    </div>
+
+    <div class="grp">
+      <div class="t">图层</div>
+      <label class="chk"><input type="checkbox" id="l_entity" checked>
+        <span class="sw" style="background:var(--blue)"></span><span>实体</span></label>
+      <label class="chk"><input type="checkbox" id="l_trail" checked>
+        <span class="sw dash" style="background:#6e7681"></span><span>历史轨迹</span></label>
+      <label class="chk"><input type="checkbox" id="l_contact" checked>
+        <span class="sw dash" style="background:var(--amber)"></span>
+        <span>探测关联线（雷达→目标）</span></label>
+      <label class="chk"><input type="checkbox" id="l_comm" checked>
+        <span class="sw dash" style="background:var(--green)"></span><span>通信链路</span></label>
+      <label class="chk"><input type="checkbox" id="l_jam" checked>
+        <span class="sw" style="background:var(--red)"></span><span>干扰关系</span></label>
+      <label class="chk"><input type="checkbox" id="l_grid" checked>
+        <span class="sw" style="background:#5a7d9a"></span><span>经纬网格</span></label>
+      <label class="chk"><input type="checkbox" id="l_label" checked>
+        <span class="sw" style="background:#8b949e"></span><span>平台名</span></label>
+    </div>
+
+    <div class="grp">
+      <div class="t">实体</div>
+      <div id="entlist"></div>
+    </div>
+    <div class="hint" id="srchint"></div>
+  </aside>
+
+  <div id="stage">
+    <div id="mapwrap">
+      <div id="map"></div>
+      <div id="note"></div>
+    </div>
+    <div id="bottom">
+      <div id="ctl">
+        <button class="btn" id="play">▶ 播放</button>
+        <button class="btn" id="prev" title="上一帧">⏮</button>
+        <button class="btn" id="next" title="下一帧">⏭</button>
+        <span id="clock">T+00:00:00</span>
+        <div id="track"><input type="range" id="slider" min="0" max="0" value="0" step="1"></div>
+        <span class="muted" id="fno">0/0</span>
+        <select id="speedsel">
+          <option value="0.5">0.5×</option>
+          <option value="1" selected>1×</option>
+          <option value="2">2×</option>
+          <option value="4">4×</option>
+          <option value="8">8×</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <aside id="info">
+    <div class="t">本帧统计</div>
+    <div id="kpis"><span class="muted">（无数据）</span></div>
+    <div class="t">通信网</div>
+    <div id="nets"><span class="muted">（无）</span></div>
+    <div class="t">在册干扰天线</div>
+    <div id="jams"><span class="muted">（无）</span></div>
+    <div class="t">雷达读数</div>
+    <div id="radars"><span class="muted">（无）</span></div>
+    <div class="t">图例</div>
+    <div id="legendtxt" class="hint"></div>
+  </aside>
+</div>
+
+<!-- 腾讯地图 GL JS：代理模式（前端不带 key，请求走 WorkBuddy 本地代理） -->
+<script>
+  window._TMapSecurityConfig = {
+    serviceHost: 'http://127.0.0.1:__WB_HTTP_PORT__/_TMapService/_wbt/__WB_TMAP_SECRET__',
+  };
+</script>
+<script src="https://map.qq.com/api/gljs?v=1.exp"></script>
+
+<script>
+// ===========================================================================
+// milsim 态势回放前端
+// ---------------------------------------------------------------------------
+// 只读 app/*.replay.json（由 tools/export_replay.py 产出），把每帧画成一层
+// 覆盖物。地图用**腾讯地图 GL JS 代理模式**——符合底图合规要求，前端零密钥。
+//
+// 坐标系：回放文件里**已经**是 GCJ-02 经纬度（引擎侧用 AED 精确解换算，
+// 已核到亚厘米）。所以这里不做任何坐标转换，直接把 lat/lng 交给地图。
+//
+// y 轴：引擎的局部平面坐标 y 轴**指向南**，但导出的是真实经纬度，
+// 该问题在导出侧已被吃掉（见 export_replay.py 的 docstring）。前端不受影响。
+// ===========================================================================
+
+const $ = (id) => document.getElementById(id);
+
+// 把地图实例挂到 window，方便真浏览器探针检查（也便于控制台调试）。
+// ★ 必须：探针里 ev('window.map') 才能拿到实例，去看
+//   renderEngine.background / painters 这些内部状态。
+window.map = null;
+
+// ---- 全局状态 ------------------------------------------------------------
+const S = {
+  data: null,        // 当前回放 payload
+  frames: [],
+  frame: 0,
+  playing: false,
+  speed: 1,
+  timer: null,
+  lastTs: 0,
+  layers: {},        // 覆盖物句柄
+  markers: {},       // entity_id -> geometry
+  // -- 实时推流 --
+  ws: null,          // WebSocket 句柄
+  live: false,       // 当前数据源是不是实时推流
+  liveFast: false,   // 实时里的哪一档：true = 一键跑完，false = 边跑边看
+  liveFollow: true,  // 是否自动跟到最新帧（用户往回拖过就停）
+  liveDone: false,   // 服务端是否已推完
+};
+
+// ---- 展示常量 ------------------------------------------------------------
+const COLOR = { red: '#E24B4A', blue: '#378ADD' };
+const COLOR_DEFAULT = '#8b949e';
+const CONTACT_COLOR = '#E0A458';
+const CONTACT_FRIEND = '#6e7681';   // 友军航迹（same_side）画灰一点
+const COMM_UP = '#3FB950';
+const COMM_DOWN = '#E24B4A';
+const JAM_COLOR = '#E24B4A';
+const GRID_COLOR = 'rgba(122,162,197,0.65)';   // 经纬网格线（蓝灰；α 加大否则在卫星图上看不清）
+const GRID_LABEL_COLOR = '#7aa2c5';            // 网格刻度文字
+const LIVE_OK = '#3FB950';    // 指示灯：已连接
+const LIVE_BAD = '#E24B4A';   // 指示灯：已断开
+
+function sideColor(side) { return COLOR[side] || COLOR_DEFAULT; }
+
+// ===========================================================================
+// 0. 几何算法（★ 移植自 CMO 1.06 源码，逐式对照，未做"改良"）
+// ---------------------------------------------------------------------------
+// 来源：``E:\CMO 1.06版本源码\Command\Worldwind\Component\CommandLayer.cs``
+// 这三个是那份源码里**真正与本项目同域、且零依赖**的东西。CMO 整体是
+// C#/WinForms + Direct3D11 桌面程序，渲染栈搬不进浏览器；但下面这几个
+// **纯数学**的函数与渲染后端无关，照抄即可。
+//
+// ★ 为什么值得抄：大圆/恒向线是"两个经纬度之间该画成什么线"的**领域约定**。
+//   自己随手插直线，在跨几千公里的场景下（本项目的航迹线正是如此）会画到
+//   地球另一边去，或者背离 CMO/AFSIM 那类系统的既有画法。既然参考实现就在
+//   手边，就没有理由重新发明。
+// ===========================================================================
+
+const D2R = Math.PI / 180;
+const R2D = 180 / Math.PI;
+
+// ★ 移植自 CMO ``UTIL_OrthodromicInterpolation``（该文件 486-498 行，静态方法）。
+//   大圆（最短航线）球面插值：给定两端经纬度与比例 f∈[0,1]，返回线上一点。
+//
+//   ★ 口径（**必须照抄，不能"顺手修正"**）：原式在函数体内把经度取负
+//     （``lon1 = -lon1; lon2 = -lon2;``），返回时又取负
+//     （``return (lat, -lon)``）。这两次取负**不是冗余**——它们是 CMO 内部
+//     投影的补偿。已验证：照抄（即 net 上"经度原样进出"）时端点精确复现，
+//     去掉取负则经度符号全反。见设计文档 §5.16.12 的端点核验表。
+//
+//   输入/输出均为**角度**（度）。内部用弧度算。
+function orthodromicInterp(lat1, lon1, lat2, lon2, f) {
+  // 原式的两次经度取负合起来是恒等，这里保留"先取负再取负"的写法以保持
+  // 与源码逐行对应——将来若 CMO 改了口径，这里能一眼看出该跟哪一处。
+  let lo1 = -lon1, lo2 = -lon2;
+  const la1 = lat1 * D2R, la2 = lat2 * D2R;
+  lo1 *= D2R; lo2 *= D2R;
+
+  const d = 2.0 * Math.asin(Math.sqrt(
+    Math.pow(Math.sin((la1 - la2) / 2.0), 2.0) +
+    Math.cos(la1) * Math.cos(la2) * Math.pow(Math.sin((lo1 - lo2) / 2.0), 2.0)));
+  // d→0（两端重合）时下面两式会 0/0。CMO 没处理，这里补一个退化出口：
+  // 重合点之间"插值"就是它自己。
+  if (d < 1e-12) return [lat1, lon1];
+  const a = Math.sin((1.0 - f) * d) / Math.sin(d);
+  const b = Math.sin(f * d) / Math.sin(d);
+  const x = a * Math.cos(la1) * Math.cos(lo1) + b * Math.cos(la2) * Math.cos(lo2);
+  const y = a * Math.cos(la1) * Math.sin(lo1) + b * Math.cos(la2) * Math.sin(lo2);
+  const lat = Math.atan2(a * Math.sin(la1) + b * Math.sin(la2),
+                         Math.sqrt(x * x + y * y));
+  const lon = Math.atan2(y, x);
+  return [lat * R2D, -lon * R2D];
+}
+
+// ★ 移植自 CMO ``LoxodromicInterpolation``（440-457 行，实例方法）。
+//   恒向线（等角航线）插值：保持航向不变的线。大圆是"最短"，恒向线是
+//   "罗盘指哪走哪"——航海/老旧航电还在用后者，两条线在长距离下差别很大。
+function loxodromicInterp(lat1, lon1, lat2, lon2, f) {
+  let lo1 = lon1 * D2R, lo2 = lon2 * D2R;
+  const la1 = lat1 * D2R, la2 = lat2 * D2R;
+  const x = (Math.cos(lo1) + Math.cos(lo2)) / 2.0;
+  const n = Math.atan2(0.0, x);
+  lo1 -= n; lo2 -= n;
+  // ★ 注意：CMO 这里 f 的作用方向与大圆那支**相反**（f=0 回到"第二个"端点）。
+  //   这是源码既有行为，照抄不动——两条线在同一 f 下端点对调，属实现细节。
+  let lon = lo2 * (1.0 - f) + lo1 * f;
+  const lat = la2 * (1.0 - f) + la1 * f;
+  lon += n;
+  while (lon > Math.PI) lon -= Math.PI * 2.0;
+  while (lon < -Math.PI) lon += Math.PI * 2.0;
+  return [lat * R2D, lon * R2D];
+}
+
+// ★ 移植自 CMO ``DrawOrthodromicLine`` / ``DrawLoxodromicLine``（459-525 行）的
+//   **细分策略**：把线按约 100 km 一段打散再逐段插值。
+//   ★ 为什么要细分而不是"两端点直接连"：直接连是**弦**，在球面上会明显
+//     偏离真实航线；按 ~100 km 细分后每段短到可以当直线画，累计误差可忽略。
+//   这里沿用同一个门限（100 km），保持与 CMO 一致的表现。
+const EARTH_R_KM = 6371.0;
+function _approxKm(lat1, lon1, lat2, lon2) {
+  // 粗距：够用来定分段数。不用精确大圆距离——这里只要数量级对。
+  const dLat = (lat2 - lat1) * D2R;
+  const dLon = (lon2 - lon1) * D2R * Math.cos((lat1 + lat2) / 2 * D2R);
+  return Math.sqrt(dLat * dLat + dLon * dLon) * EARTH_R_KM;
+}
+
+//: 把一条经纬度折线按 CMO 的规则加密成"画在地图上不会飘"的点串。
+//: mode: 'ortho'（大圆，默认）/ 'loxo'（恒向线）/ 'straight'（不加密）
+function densifyPath(path, mode) {
+  if (!path || path.length < 2) return path || [];
+  if (mode === 'straight') return path;
+  // path 元素是 {lat,lng}（把 TMap.LatLng 也当同类对象读，字段名兼容）
+  const get = (p) => [p.lat != null ? p.lat : p.getLat(),
+                      p.lng != null ? p.lng : p.getLng()];
+  const interp = (mode === 'loxo') ? loxodromicInterp : orthodromicInterp;
+  const out = [];
+  for (let i = 0; i < path.length - 1; i++) {
+    const [a0, a1] = get(path[i]);
+    const [b0, b1] = get(path[i + 1]);
+    const km = _approxKm(a0, a1, b0, b1);
+    const seg = Math.max(2, Math.floor(km / 100.0));   // 与 CMO 同一个门限
+    if (seg < 2) { out.push({ lat: a0, lng: a1 }); continue; }
+    for (let k = 0; k < seg; k++) {
+      const f = k / seg;
+      // ★ 逐段取细分点；最后一点由下一段（或收尾）补，避免重复
+      const [la, lo] = interp(a0, a1, b0, b1, mode === 'loxo' ? 1 - f : f);
+      out.push({ lat: la, lng: lo });
+    }
+  }
+  const [e0, e1] = get(path[path.length - 1]);
+  out.push({ lat: e0, lng: e1 });
+  return out;
+}
+
+// ★ 移植自 CMO ``DrawDashedLine``（784-806 行）的**屏幕空间**虚线策略：
+//   原文把线段按 ``max(len/5, 2)`` 段等分，然后**隔一段画一段**（i += 2）。
+//   ★ 精髓在于"按屏幕像素长度切分"而不是按经纬度——按经纬度切的话，
+//     地图缩放时虚线的疏密会跟着变（放大就变实线、缩小就糊成一片）。
+//   这里把这个策略落到**地图投影后的屏幕坐标**上：先由腾讯 SDK
+//   （``map.project`` / ``map.unproject``，若可用）把两端投影，再按像素
+//   等分取"实段"，最后反投影回经纬度交给 Polyline。
+const DASH_PX = 5.0;   // CMO 原文的除数就是 5 像素
+
+//: 把一条经纬度线段换成"屏幕空间固定间隔的实段列表"。
+//: 返回**若干条短折线**（每条是一个实段），供 MultiPolyline 批量画。
+//: ★ 若 SDK 不支持投影（拿不到 project/unproject），退化为普通虚线，
+//:   不会让整条线消失。
+function screenSpaceDash(aLat, aLng, bLat, bLng, dashPx) {
+  const step = dashPx || DASH_PX;
+  const canProject = map && typeof map.unproject === 'function' &&
+                     typeof map.project === 'function';
+  if (!canProject) return [[{ lat: aLat, lng: aLng }, { lat: bLat, lng: bLng }]];
+  let pa, pb;
+  try {
+    pa = map.project(new TMap.LatLng(aLat, aLng));
+    pb = map.project(new TMap.LatLng(bLat, bLng));
+  } catch (e) { return [[{ lat: aLat, lng: aLng }, { lat: bLat, lng: bLng }]]; }
+  const dx = pb.x - pa.x, dy = pb.y - pa.y;
+  const len = Math.sqrt(dx * dx + dy * dy);
+  if (!(len > 0)) return [[{ lat: aLat, lng: aLng }, { lat: bLat, lng: bLng }]];
+  // 与 CMO 同构：总段数 = max(len/step, 2)，隔段取实
+  const num = Math.max(2, Math.round(len / step));
+  const segs = [];
+  for (let i = 0; i < num; i += 2) {
+    const t0 = i / num, t1 = Math.min((i + 1) / num, 1);
+    const q0 = map.unproject(new TMap.Point(pa.x + dx * t0, pa.y + dy * t0));
+    const q1 = map.unproject(new TMap.Point(pa.x + dx * t1, pa.y + dy * t1));
+    segs.push([{ lat: q0.getLat(), lng: q0.getLng() },
+               { lat: q1.getLat(), lng: q1.getLng() }]);
+  }
+  return segs;
+}
+
+// ===========================================================================
+// 1. 数据加载
+// ===========================================================================
+
+const SCENARIOS = [
+  { file: 'comm_track_jam.replay.json', label: '探测→传航迹→引导干扰（60 s）' },
+  { file: 'patrol.replay.json', label: '巡逻遭遇（120 s）' },
+  { file: 'mover_demo.replay.json', label: '五类运载器机动（600 s）' },
+];
+
+// 实时推流时，服务端要推哪份想定（与上面的 file 一一对应成 scenarios/xxx.txt）
+const LIVE_SCENARIOS = {
+  'comm_track_jam.replay.json': 'scenarios/comm_track_jam.txt',
+  'patrol.replay.json': 'scenarios/patrol.txt',
+  'mover_demo.replay.json': 'scenarios/mover_demo.txt',
+};
+
+function currentSrcMode() {
+  const el = document.querySelector('input[name="src"]:checked');
+  return el ? el.value : 'file';
+}
+
+function fillScenarioSelect() {
+  const sel = $('scen');
+  sel.innerHTML = '';
+  for (const s of SCENARIOS) {
+    const o = document.createElement('option');
+    o.value = s.file; o.textContent = s.label;
+    sel.appendChild(o);
+  }
+}
+
+// ===========================================================================
+// 数据源切换：离线文件 / 实时推流
+// ===========================================================================
+
+function reloadCurrent() {
+  closeLive();
+  setPlaying(false);
+  const mode = currentSrcMode();
+  if (mode === 'fast' || mode === 'live') {
+    startLive(LIVE_SCENARIOS[$('scen').value], mode);
+  } else {
+    loadReplay($('scen').value);
+  }
+}
+
+async function loadReplay(file) {
+  showNote('正在加载 ' + file + ' …');
+  try {
+    const resp = await fetch(file, { cache: 'no-store' });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    if (data.format !== 'milsim-replay/1') {
+      throw new Error('格式不符：' + data.format + '（期望 milsim-replay/1）');
+    }
+    S.live = false;
+    S.data = data;
+    S.frames = data.frames || [];
+    S.frame = 0;
+    onDataReady();
+    hideNote();
+  } catch (err) {
+    showNote('加载失败：' + err.message +
+      '。若想用离线文件，请从服务端页面打开（不能用 file:// 直开）。', true);
+  }
+}
+
+// ---- 实时推流（WebSocket） ------------------------------------------------
+// 协议见 tools/serve_replay.py：
+//   {type:"hello", zones, entities, legend, ...}  → 静态部分，建底图与实体表
+//   {type:"frame", frame:{...}}                   → 每拍一帧，**追加**到 S.frames
+//   {type:"done", frames, report}                 → 跑完
+//   {type:"error", message}                       → 出错
+//
+// ★ 关键设计：实时帧与离线帧**是同一份结构**（共用 milsim.services.replay），
+//   所以渲染路径完全复用——S.frames 只是"边到边增长"。区别只有两点：
+//   ① 实时模式下自动跟到最新帧（除非用户手动往回拖）；
+//   ② 时间轴长度随帧数增长。
+//
+// ★ "一键跑完"与"边跑边看"**不是两套代码**：服务端同一个会话、前端同一条
+//   渲染路径，差别只是 URL 上多一个 mode（fast ⇒ 服务端 pace=0，全速推）。
+//   跑完后 S.frames 已经装满了整场 ⇒ 时间轴/播放/单步全都照常可用。
+function startLive(scenarioPath, mode) {
+  if (!scenarioPath) { showNote('这份想定没有实时推流通道', true); return; }
+  const fast = (mode === 'fast');
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const url = proto + '//' + location.host + '/ws?scenario=' +
+              encodeURIComponent(scenarioPath) + (fast ? '&mode=fast' : '');
+  showNote((fast ? '正在全速推演 ' : '正在连接实时推流 ') + scenarioPath + ' …');
+
+  // ★ 切数据源必须**先清干净上一次的帧**。不清的话：
+  //   ① 上一档的帧还留在 S.frames 里，fno 会显示成 "1/32"（31 旧 + 1 新）；
+  //   ② slider.max 按旧长度算，拖到中段会缺帧；
+  //   ③ "已跑完：共 16 帧" 与实际 15 帧对不上（差的那 1 帧是上一档留下的初帧）。
+  //   服务端本就按 (想定, 模式) 各开一份会话、从第 0 拍推起，
+  //   所以这里清空才是与它对齐的做法。
+  S.frames = [];
+  S.frame = 0;
+  S.liveDone = false;
+  S.playing = false;
+  $('slider').max = 0;
+  $('slider').value = 0;
+  $('fno').textContent = '0/0';
+
+  let ws;
+  try { ws = new WebSocket(url); }
+  catch (err) { showNote('无法建立 WebSocket：' + err.message, true); return; }
+
+  S.ws = ws;
+  S.live = true;
+  S.liveFast = fast;
+  S.liveFollow = true;
+
+  let gotFirstFrame = false;
+
+  ws.onopen = () => {
+    setLiveDot(fast ? 'f' : 'l', '● 已连接', LIVE_OK);
+    showNote(fast ? '已连接，全速跑完请稍候…' : '已连接，等待第一拍…');
+  };
+
+  ws.onmessage = (ev) => {
+    let msg;
+    try { msg = JSON.parse(ev.data); } catch (e) { return; }
+
+    if (msg.type === 'hello') {
+      S.data = {
+        format: msg.format, scenario: msg.scenario, seed: msg.seed,
+        max_step_us: msg.max_step_us, sample_us: msg.sample_us,
+        duration_us: msg.duration_us, zones: msg.zones,
+        entities: msg.entities, legend: msg.legend,
+        frames: [], report: null, live: true,
+      };
+      S.frames = S.data.frames;
+      S.frame = 0;
+      buildEntityList();
+      buildStaticLayers();
+      renderLegend();
+      $('fmt').textContent = S.data.format.replace('milsim-replay/', 'v') +
+        (fast ? ' · 一键跑完' : ' · 实时');
+      if (msg.log && msg.log.length) showNote(msg.log.join('；'));
+      else hideNote();
+      return;
+    }
+
+    if (msg.type === 'frame') {
+      S.frames.push(msg.frame);
+      $('slider').max = Math.max(0, S.frames.length - 1);
+      // 自动跟最新帧（用户往回拖过就停下跟随，尊重他的操作）。
+      // ★ 一键跑完模式**不逐帧重绘**：帧到得比屏幕快，重绘纯属浪费；
+      //   等 done 那一下再一次性渲染（跑完的瞬间看到的就是终局）。
+      if (fast) {
+        if (!gotFirstFrame) { gotFirstFrame = true; render(0); }
+        $('fno').textContent = (S.frame + 1) + '/' + S.frames.length;
+      } else if (S.liveFollow) {
+        render(S.frames.length - 1);
+      } else {
+        $('fno').textContent = (S.frame + 1) + '/' + S.frames.length;
+      }
+      return;
+    }
+
+    if (msg.type === 'done') {
+      if (msg.report) S.data.report = msg.report;
+      S.liveDone = true;
+      if (fast) {
+        // 跑完了 ⇒ 整场都在本地，时间轴/播放/单步全部解锁
+        setPlaying(false);
+        stepTo(0);
+        showNote('已跑完：共 ' + (msg.frames || S.frames.length) +
+          ' 帧，可拖时间轴回看');
+      } else {
+        showNote('推流结束：共 ' + (msg.frames || S.frames.length) + ' 帧' +
+          (msg.stopped ? '（被中断）' : ''));
+      }
+      return;
+    }
+
+    if (msg.type === 'error') {
+      showNote('服务端报错：' + msg.message, true);
+    }
+  };
+
+  ws.onerror = () => {
+    showNote('连接出错。请确认 tools/serve_replay.py 正在运行，' +
+      '且页面是从它给的地址打开的。', true);
+  };
+  ws.onclose = () => {
+    if (S.ws === ws) S.ws = null;
+    setLiveDot(fast ? 'f' : 'l', '● 已断开', LIVE_BAD);
+    if (!S.liveDone) { showNote('连接已断开'); }
+  };
+}
+
+// 两个数据源各有自己的指示灯（一键跑完 / 边跑边看）
+function setLiveDot(which, text, color) {
+  const dot = $(which === 'f' ? 'livedot_f' : 'livedot_l');
+  if (dot) { dot.textContent = text; dot.style.color = color; }
+}
+
+function closeLive() {
+  if (S.ws) {
+    try { S.ws.close(); } catch (e) { /* 已经关了 */ }
+    S.ws = null;
+  }
+  S.live = false;
+  S.liveFast = false;
+  S.liveFollow = true;
+  S.liveDone = false;
+  for (const id of ['livedot_f', 'livedot_l']) {
+    const dot = $(id);
+    if (dot) { dot.textContent = '（需服务端）'; dot.style.color = ''; }
+  }
+}
+
+function onDataReady() {
+  const d = S.data;
+  $('fmt').textContent = d.format.replace('milsim-replay/', 'v');
+  $('slider').max = Math.max(0, S.frames.length - 1);
+  $('slider').value = 0;
+  $('srchint').textContent =
+    (d.scenario || '') + ' · 引擎步长 ' + (d.max_step_us / 1e6) + ' s' +
+    ' · 采样 ' + (d.sample_us / 1e6) + ' s' +
+    ' · 共 ' + S.frames.length + ' 帧';
+  buildEntityList();
+  buildStaticLayers();
+  renderLegend();
+  render(0);
+}
+
+
+// ===========================================================================
+// 2. 地图与静态图层
+// ===========================================================================
+
+let map = null;
+
+function initMap() {
+  // 腾讯地图 GL JS（代理模式）：SDK 内部请求走本地代理，前端无密钥。
+  // 中心先给战区锚点；加载数据后再按战区范围自适应。
+  //
+  // ★ showControl:false 关掉 SDK 自带的一排控件（缩放条、比例尺、版权/logo
+  //   那一块）。这是官方建图选项（"是否显示地图控件"），不是 hack——CSS 去
+  //   盖 DOM 既脆又容易在某次 SDK 升级后失效。底图合规靠的是**接入方式**
+  //   （腾讯官方 SDK + 代理模式 + 不缓存瓦片），跟界面上露不露那行版权字无关。
+  //
+  // ★ 2D 模式：态势回放要的是"上北下南"的稳定参照，不能容忍 3D 视角下
+  //   拖动就倾斜旋转（那会让同一份经纬度在不同视角下看着不一样）。
+  //   viewMode:'2D' 是官方选项，固定俯仰=0、旋转=0。
+  //
+  // ★ baseMap: null = **不要腾讯的底图**，只留我们自己叠的卫星影像。
+  //   这不是猜的：SDK 源码里那一行就是
+  //     ``baseMap = null === e.baseMap ? null : e.baseMap || zs.DEFAULT_BASEMAP.vector``
+  //   —— 显式传 ``null`` 走的是"就是 null"这条分支，**不会**回退到矢量图；
+  //   只有"没传 / 传 undefined"才会用 ``DEFAULT_BASEMAP.vector``。
+  //   （SDK 只认 ``vector`` 与 ``satellite`` 两种 type，没有 ``none``；
+  //     实测 ``{type:'none'}`` 会被当成未知值而**静默回退成矢量图**。）
+  //
+  // ★ 为什么不直接用官方的 ``{type:'satellite'}``：
+  //   官方卫星瓦片在**高缩放级**把路网与中文地名**烧进了影像本身**
+  //   （实测 z11 满屏"三环/四环/北京西站"），那正是用户说的"还是 2 维地图"。
+  //   我们要的是一张干净的卫星影像——所以底图让位，
+  //   影像全部由 ``initSatLayer()`` 的 BMNG 整幅图提供。
+  //
+  // ★ 没有服务端时（``file://`` 直开）``/satmap`` 取不到，画面就是空底 +
+  //   我们的叠加层。这比"悄悄换回矢量底图"好：矢量底图一出现，
+  //   "这到底是不是卫星图"就又不确定了——宁可空，也不要误导。
+  map = new TMap.Map('map', {
+    // ★ 初始 zoom 压到 8：BMNG 源只到 z6，墨卡托侧也只提供到 z6；
+    //   再往上 SDK 会放大采样（``maxZoom`` 开到 18），但一上来就 11 级
+    //   会糊得看不清。8 级下影像还能辨认地形，且战区包围盒自适应
+    //   （fitToZones）随后会按实际战区分幅再定一次视角。
+    zoom: 8,
+    center: new TMap.LatLng(39.9042, 116.4074),
+    baseMap: null,
+    showControl: false,
+    viewMode: '2D',
+  });
+  window.map = map;               // 供探针/控制台检查（见文件头）
+  // ★★ 渲染引擎背景刷成**全透明** ★★
+  //   SDK 默认背景 ``rgba(242,241,237,1)``（不透明米白）铺在**所有图层
+  //   之下**。刷透明后由我们的瓦片图层独占画面，瓦片没到的地方才透出
+  //   ``#mapwrap`` 的底色。只认 ``rgba(...)``/``#rrggbb`` 这类合法色值；
+  //   ``'transparent'`` 会被拒（console 报"color格式不正确"）。
+  map.setBackgroundColor('rgba(0,0,0,0)');
+  hideSdkBranding();
+  // ★ 卫星影像：AFSIM 自带的 NASA Blue Marble NG 本地 mbtiles
+  //   （``resources/maps/bluemarble_db/bmng.mbtiles``，公有领域），
+  //   由 tools/serve_replay.py 的 ``/tiles`` 逐块重投影成 **Web 墨卡托**
+  //   瓦片喂给官方 ``TMap.ImageTileLayer``。
+  initSatLayer();
+  // ★ 经纬网格是**屏幕空间**的规则线（间距按像素定），视图一变就得按新
+  //   视野重算步长；屏幕空间虚线同理（投影变了实段位置就错位）⇒ 重画一帧。
+  // ★★ 为什么不只押一两个事件名：各版 SDK 的事件命名不一（``zoom_end`` /
+  //   ``zoomend`` 都有版本在用），押错一个 = 视图变了网格不重建 = 用户看到
+  //   "缩小之后网格和东经北纬坐标全没了"（网格还停在旧视野那一小块上）。
+  //   所以这里**多押几个候选事件名 + 800 ms 轮询兜底**：轮询比对视野签名
+  //   （四角经纬度），变了才重建——不依赖任何事件名，SDK 怎么改都不怕。
+  //   首次建网格也由它兜住：``getBounds()`` 就绪前签名是空串，就绪当拍
+  //   签名变化 ⇒ 自动建一次，不再需要单独的"就绪重试"。
+  let _lastViewSig = '';
+  const viewSig = () => {
+    try {
+      const b = map.getBounds();
+      if (!b) return '';
+      const sw = b.getSouthWest(), ne = b.getNorthEast();
+      return [sw.getLat(), sw.getLng(), ne.getLat(), ne.getLng()]
+        .map((v) => v.toFixed(5)).join(',');
+    } catch (e) { return ''; }
+  };
+  const onViewChange = () => {
+    const sig = viewSig();
+    if (!sig || sig === _lastViewSig) return;
+    _lastViewSig = sig;
+    buildGridLayer();
+    if (S.frames.length) render(S.frame);
+  };
+  if (typeof map.on === 'function') {
+    for (const ev of ['zoomend', 'zoom_end', 'dragend', 'drag_end',
+                      'panend', 'pan_end']) {
+      try { map.on(ev, onViewChange); } catch (e) { /* 事件名不存在就略过 */ }
+    }
+  }
+  setInterval(onViewChange, 800);
+}
+
+// ===========================================================================
+// 卫星影像底图（★ 服务端拼一整幅 + 官方 TMap.ImageGroundLayer 按经纬度贴）
+// ---------------------------------------------------------------------------
+// ★★ 底图为什么之前一直是黑的 —— 总根因（真浏览器逐项实测，别再翻案）★★
+//
+// A. 库里是 **plate carrée（等经纬度）2:1**，SDK 要的是 **Web 墨卡托**。
+//    库自身的 ``metadata.profile``：
+//      num_tiles_wide_at_lod_0=2, num_tiles_high_at_lod_0=1,
+//      srs="+proj=longlat +datum=WGS84 +no_defs"
+//    ⇒ 列 ``2*2^z``、行 ``2^z``，整幅 lon -180~180 / lat 90~-90。
+//    这一点由 **AFSIM 自己的地图定义**坐实：
+//      ``resources/maps/bluemarble_db/bmng_flat.earth``
+//        ``<map type="projected"><options><profile>plate-carre</profile>``
+//    而腾讯 GL JS 只认 Web 墨卡托 XYZ 瓦片。实测（探针 g19）：
+//      ``ImageTileLayer.getTileUrl`` 被调用，参数是 ``z=8,x=210,y=97``
+//      （反算 lon=115.31 lat=21.80，正是墨卡托格号），还调过一次
+//      ``z=0,x=0,y=0`` —— 我们 z0 明明是 2 列 1 行，对不上。
+//    ⇒ SDK 拿不到它要的瓦片，就 **静默丢弃**：getTileUrl 被调、
+//      网络里 **0 条** ``/tiles/`` 请求、画布上一个像素都不画。
+//
+// B. 所有 SDK 栅格图层在这条链路上都"不出图"（逐一验过）：
+//      · ``ImageTileLayer``  —— 调 getTileUrl 但不取
+//      · ``ImageGroundLayer`` —— 构造成功、``_image`` 已解码、
+//        登记为 ``IMAGE_Ground``、``visible=true``，仍不画
+//      · SDK **没有** ``TMap.TileLayer``（只有上面两个 + ``WMTSLayer``）
+//      · 给地图挂官方 ``setBaseMap({type:'satellite'})`` 也救不回来
+//
+// C. 解法 = **服务端重投影**。``tools/serve_replay.py`` 的 ``/tiles``
+//    把 plate-carrée 源按真实映射重采样成 Web 墨卡托瓦片（``_merc_tile``），
+//    前端只用 SDK 最标准的 ``ImageTileLayer`` 指过去即可。
+//    离线验收：z4 全幅墨卡托图 = 标准墨卡托世界（格陵兰显著放大、
+//    南极铺满底边、各洲比例正确），与 plate-carrée 那张明显不同。
+//
+// D. 背景与配色：``renderEngine.background`` 默认不透明米白
+//    ``rgba(242,241,237,1)``，已刷成 ``rgba(0,0,0,0)``（见 initMap），
+//    瓦片没到的地方透出 ``#mapwrap`` 的深色底。
+// ---------------------------------------------------------------------------
+const SAT_MAX_Z = 6;      // 源库只到 z6 ⇒ 墨卡托侧也只到 z6
+let satLayer = null;      // ImageTileLayer 句柄
+let satDbg = null;        // 给探针看的诊断信息
+
+// 建"卫星底图"瓦片图层。
+//
+// ★ 用官方 ``TMap.ImageTileLayer``：它天生就是"每块瓦片一个 URL"的用法
+//   （官方示例即 ``new TMap.ImageTileLayer({map, getTileUrl})``）。
+//   服务端已把瓦片重投影成它要的墨卡托格号，所以这里只是个直白的
+//   地址拼接 —— 不做任何坐标换算。
+function initSatLayer() {
+  if (typeof TMap.ImageTileLayer !== 'function') {
+    console.warn('本版 SDK 没有 ImageTileLayer，跳过卫星底图');
+    return;
+  }
+  try {
+    satLayer = new TMap.ImageTileLayer({
+      map: map,
+      zIndex: 1,
+      // ★★ 两个"缺了就静默空白"的选项（见设计文档 §5.16.12/§5.16.13）★★
+      //
+      // ① ``isMainThreadLoaded: true`` —— **必须**。
+      //    默认是 ``false``，SDK 会在 **Web Worker** 里发瓦片请求；
+      //    而 Worker 里**没有 ``location``** ⇒ 相对 URL 无法解析 ⇒
+      //    每张瓦片都抛 ``Invalid URL``。**只在 console 报错，界面上
+      //    就是一片空白**，极难定位。官方文档原话："从子线程发出请求
+      //    可能命中浏览器的安全策略，导致请求失败，此时可改用主线程加载。"
+      //
+      // ② ``maxDataZoom`` —— **必须显式写**。
+      //    只写 ``maxZoom`` 挡不住 SDK 往上请求（实测 ``maxZoom:6`` 时
+      //    仍请求 z=10 ⇒ 全 404）。v0.13.48 起服务端支持**越级放大**
+      //    （z 超过源库 6 级也照常出图，从最高级源图采样），所以这里
+      //    放开到 12：放大过 6 级地形仍在，只是逐渐变糊（源分辨率有限）。
+      isMainThreadLoaded: true,
+      minZoom: 0,
+      maxZoom: 18,
+      maxDataZoom: 12,
+      // ★ z 原样透传给服务端：<=6 正常重投影，>6 服务端越级放大。
+      //   （旧版在这里夹到 SAT_MAX_Z，放大过 6 级就整片空白。）
+      getTileUrl: (x, y, z) => '/tiles/' + z + '/' + x + '/' + y + '.jpg',
+    });
+    satDbg = { layer: !!satLayer, maxZ: SAT_MAX_Z };
+  } catch (e) {
+    console.warn('卫星底图图层建立失败：', e);
+  }
+}
+
+// 把 SDK 自己插进来的"腾讯地图"logo/版权链接变成**不可点**。
+// 它默认是 <a href="..."> 且会跳转到 map.qq.com，正好压在控制条上方；
+// showControl:false 只管"控件"，管不到这个强制的品牌链。
+// ★ 只改它自己的 pointer-events，不动地图交互（地图本体是 canvas，
+//   不受影响）；并且用 MutationObserver 兜住 SDK 晚一步插入的情况。
+function hideSdkBranding() {
+  const kill = () => {
+    const host = $('map');
+    if (!host) return;
+    for (const el of host.querySelectorAll('a')) {
+      el.style.pointerEvents = 'none';
+      el.style.display = 'none';
+    }
+    // 有些版本不用 <a>，而是一个带 title/class 的 div
+    for (const el of host.querySelectorAll('[class*="logo"], [class*="copyright"]')) {
+      el.style.pointerEvents = 'none';
+      el.style.display = 'none';
+    }
+  };
+  kill();
+  try {
+    const mo = new MutationObserver(kill);
+    mo.observe($('map'), { childList: true, subtree: true });
+    // 观察 5 秒后就断开，别让它一直跑
+    setTimeout(() => mo.disconnect(), 5000);
+  } catch (e) { /* 老浏览器没有 MutationObserver：kill() 那次也够用了 */ }
+}
+
+function buildStaticLayers() {
+  // ★ 战区边界层已删（v0.13.49：用户裁定"战区边界画不出来→把这个选项删了"）。
+  //   zones 数据**保留**：fitToZones 还要用它定初始视野。
+  fitToZones();
+}
+
+function fitToZones() {
+  const z = S.data.zones[0];
+  if (!z) return;
+  // 用战区的包围盒设视野：半径换算成经纬度跨度，留一点边
+  const R = 6371008.8, rad = z.radius_m / R;
+  const dLat = rad * 180 / Math.PI;
+  const dLng = dLat / Math.cos(z.lat * Math.PI / 180);
+  const bounds = new TMap.LatLngBounds(
+    new TMap.LatLng(z.lat - dLat * 1.15, z.lng - dLng * 1.15),
+    new TMap.LatLng(z.lat + dLat * 1.15, z.lng + dLng * 1.15),
+  );
+  map.fitBounds(bounds, { padding: 30 });
+}
+
+function clearLayer(key) {
+  const h = S.layers[key];
+  // ★ 句柄有两种形态：单图层（entities/jam）与**数组**（trails/contacts/comm
+  //   按阵营或实/虚各建一层）。数组没有 setMap 方法，旧版这里直接跳过 ⇒
+  //   上一帧的折线整层留在地图上，新一帧再画一份 ⇒ 探测关联线越积越多
+  //   （用户实测"已渲染的探测关联线在下一帧还保留"的真凶）。
+  //   数组形态必须逐个摘除。
+  if (Array.isArray(h)) {
+    for (const l of h) { if (l && l.setMap) l.setMap(null); }
+  } else if (h && h.setMap) { h.setMap(null); }
+  S.layers[key] = null;
+}
+
+// ===========================================================================
+// 2.5 经纬网格（graticule）—— **标准地图层那种**（v0.13.49 重做）
+// ---------------------------------------------------------------------------
+// ★ 用户裁定（v0.13.49）：旧版"六维网格"（网格 + 右上角高度/时刻刻度带）
+//   与地图层上的经纬网**不是一个东西**，要的是后者——普通的、随视野
+//   自适应疏密的经纬网，线上标**东经/北纬**读数。
+//   ⇒ 刻度带（``#gridscale``）整块删除；网格只做经纬线 + 坐标标注。
+// ★ 网格线随缩放重建（每格约 80~120 px），由 initMap 里的"视野签名"
+//   监听器驱动（事件名多押 + 轮询兜底），任何缩放级别下都铺满全视野。
+// ★ 标注写在**东/西经、南/北纬**（用户点名要这种读法），纬线标在视野
+//   左缘、经线标在视野下缘——与常规地图软件一致。
+// ★ 跨 0°/180° 经线的视野：网格线仍按"当前视野内"逐条生成，
+//   半球侧的读数由符号自动带出（东/西经、南/北纬）。
+const GRID_MIN_PX = 80;      // 网格最小像素间距（太密就退一级）
+const GRID_MAX_LINES = 40;   // 单方向最多画多少条（防极端缩放画爆）
+
+function gridStepDeg(span) {
+  // 从"整度"里挑一个让间距 ≥ GRID_MIN_PX 的步长
+  const cands = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 20, 30, 45];
+  const mapW = $('map').clientWidth || 800;
+  for (const c of cands) {
+    if (span / c <= (mapW / GRID_MIN_PX)) return c;
+  }
+  return 45;
+}
+
+// 经/纬度 → "东经 116.25°" 式读数（用户点名的口径）
+function gridLabelDeg(v, isLat, step) {
+  const dir = isLat ? (v >= 0 ? '北纬 ' : '南纬 ')
+                    : (v >= 0 ? '东经 ' : '西经 ');
+  return dir + Math.abs(v).toFixed(step < 1 ? 2 : 0) + '°';
+}
+
+function buildGridLayer() {
+  if (!$('l_grid').checked) { clearLayer('grid'); return; }
+  let b;
+  try { b = map.getBounds(); } catch (e) { return; }
+  if (!b) return;
+  const sw = b.getSouthWest(), ne = b.getNorthEast();
+  const lat0 = sw.getLat(), lat1 = ne.getLat();
+  const lng0 = sw.getLng(), lng1 = ne.getLng();
+  const dLat = Math.max(1e-6, lat1 - lat0), dLng = Math.max(1e-6, lng1 - lng0);
+  const sLat = gridStepDeg(dLat), sLng = gridStepDeg(dLng);
+
+  const paths = [], labels = [];
+  // 纬线（东西向）——读数标在视野左缘
+  let n = 0;
+  for (let la = Math.ceil(lat0 / sLat) * sLat; la <= lat1 && n < GRID_MAX_LINES;
+       la += sLat, n++) {
+    paths.push({ id: 'lat' + n, styleId: 'g',
+                 paths: [new TMap.LatLng(la, lng0), new TMap.LatLng(la, lng1)] });
+    labels.push({ id: 'latl' + n, styleId: 'gl',
+                  content: gridLabelDeg(la, true, sLat),
+                  position: new TMap.LatLng(la, lng0) });
+  }
+  // 经线（南北向）——读数标在视野下缘
+  n = 0;
+  for (let lo = Math.ceil(lng0 / sLng) * sLng; lo <= lng1 && n < GRID_MAX_LINES;
+       lo += sLng, n++) {
+    paths.push({ id: 'lng' + n, styleId: 'g',
+                 paths: [new TMap.LatLng(lat0, lo), new TMap.LatLng(lat1, lo)] });
+    labels.push({ id: 'lngl' + n, styleId: 'gl',
+                  content: gridLabelDeg(lo, false, sLng),
+                  position: new TMap.LatLng(lat0, lo) });
+  }
+
+  clearLayer('grid');
+  clearLayer('gridlab');
+  if (paths.length) {
+    S.layers.grid = new TMap.MultiPolyline({
+      map,
+      // ★ 钉在底图之上（zIndex 阶梯见 zones 处注释）：网格 3 / 标签 4
+      zIndex: 3,
+      styles: { g: new TMap.PolylineStyle({
+        // ★ width 必须是**整数**：SDK 对小数宽度直接判"属性无效"并把
+        //   整条样式拒掉（console 报 "PolylineStyle.width属性无效"，
+        //   实测 1.5/2.5 都中招）⇒ 网格线/干扰线整层画不出来。
+        //   v0.13.49 想把网格加粗到 1.5 结果适得其反，这里回到 2。
+        color: GRID_COLOR, width: 2, borderWidth: 0 }) },
+      // ★ 官方契约：MultiPolyline 的几何字段名是 ``paths``（复数），
+      //   且**一条折线至少 3 个点**（SDK 内部判 ``length>=3`` 才当折线画）。
+      //   网格线是两点直线 ⇒ 补一个中点凑成 3 点，否则**静默不画**。
+      geometries: paths.map((p) => ({ ...p, paths: densify(p.paths) })),
+    });
+  }
+  if (labels.length) {
+    S.layers.gridlab = new TMap.MultiLabel({
+      map,
+      zIndex: 4,
+      styles: { gl: new TMap.LabelStyle({
+        color: GRID_LABEL_COLOR, size: 10, offset: { x: 2, y: -2 },
+        // ★ 半透明深底：缩得很小时底图是大片海洋/陆地色块，全透明底
+        //   的浅蓝字会"沉"进底图里（用户实测"缩小后坐标没了"的一半体感）。
+        backgroundColor: 'rgba(13,17,23,0.55)', borderWidth: 0 }) },
+      geometries: labels,
+    });
+  }
+}
+
+// 两点直线 → 补中点凑 3 点（绕开 SDK "至少 3 点" 的判据）
+function densify(pts) {
+  if (pts.length >= 3) return pts;
+  const mid = new TMap.LatLng((pts[0].getLat() + pts[1].getLat()) / 2,
+                              (pts[0].getLng() + pts[1].getLng()) / 2);
+  return [pts[0], mid, pts[1]];
+}
+
+// ===========================================================================
+// 3. 渲染一帧
+// ===========================================================================
+
+function render(i) {
+  if (!S.data || !S.frames.length) return;
+  i = Math.max(0, Math.min(S.frames.length - 1, i));
+  S.frame = i;
+  const f = S.frames[i];
+
+  $('slider').value = i;
+  $('clock').textContent = f.at_text || ('T+' + (f.at / 1e6).toFixed(1));
+  $('fno').textContent = (i + 1) + '/' + S.frames.length;
+
+  renderTrails(i);
+  renderEntities(f);
+  renderContacts(f);
+  renderComm(f);
+  renderJammers(f);
+  renderInfo(f);
+}
+
+//: 把一条几何归一化成"腾讯 PolylineGeometry 一定接受"的形式。
+//: ★★ 两条硬约束，都是**读 SDK 源码 + 官方文档**核出来的，别再改：
+//:
+//:   ① **字段名是 `paths`（复数），不是 `path`。**
+//:      SDK 的 `_checkGeometries` 原话（gljs 源码，去混淆后）：
+//:          var i = t.paths, n = t.rainbowPaths;
+//:          (i || n || console.error("...实际第" + e + "元素的未传入路径信息！"))
+//:      写 `path` ⇒ SDK 读到 `paths === undefined` ⇒ 直接报"未传入路径信息！"
+//:      并**整条几何丢掉**。
+//:      官方文档同样写作 `paths`：`LatLng[]` 或 `LatLng[][]`，
+//:      `[latLng1, latLng2, latLng3]` 表示一条折线。
+//:
+//:   ② **一条折线至少要 3 个点。**
+//:      SDK 的 `isSimple` 判据（同源）：
+//:          function l(t){ return t.length >= 3 &&
+//:                         Number.isFinite(t[0].lat) && Number.isFinite(t[0].lng); }
+//:      只给 2 个点 ⇒ 即使字段名对了，`!isSimple(paths)` 为真 ⇒ 报
+//:      "paths属性无效！"。**2 点的直线段在腾讯 GL JS 里画不出来**，
+//:      必须补点补到 ≥3（下面用"中点对折"补，几何上仍是同一条直线）。
+//:
+//: 这个检查发生在 SDK 内部、且是**异步渲染期**，靠"构造时不报错"抓不到
+//: （实测构造期全部通过、报错仍出现）。所以在出口统一兜一道：
+//: 不合格的直接不传，合格的一律补齐 + 转 TMap.LatLng。
+//: 返回 null 表示这条几何不可用，调用方应跳过。
+const MIN_PATH_PTS = 3;   //: ★ 腾讯 GL JS 的硬下限（isSimple 要求 >= 3）
+
+function safeGeom(g, styleId) {
+  const p = g && (g.paths || g.path);
+  if (!Array.isArray(p)) return null;
+  const pts = [];
+  for (const q of p) {
+    if (!q) continue;
+    const la = (typeof q.getLat === 'function') ? q.getLat() : q.lat;
+    const lo = (typeof q.getLng === 'function') ? q.getLng() : q.lng;
+    if (!isFinite(la) || !isFinite(lo)) continue;
+    pts.push((typeof q.getLat === 'function') ? q : new TMap.LatLng(la, lo));
+  }
+  if (pts.length < 2) return null;
+  // ★ 补到 3 点：在首尾之间插中点（对折），端点不动、几何仍是同一条直线。
+  while (pts.length < MIN_PATH_PTS) {
+    const a = pts[0];
+    const ala = a.getLat(), alo = a.getLng();
+    const bla = pts[pts.length - 1].getLat(), blo = pts[pts.length - 1].getLng();
+    pts.splice(Math.ceil(pts.length / 2), 0,
+               new TMap.LatLng((ala + bla) / 2, (alo + blo) / 2));
+  }
+  // ★ 去重相邻同点（SDK 内部 normalize 会做，但先做掉更省事）
+  const uniq = [pts[0]];
+  for (let i = 1; i < pts.length; i++) {
+    const q = pts[i], r = uniq[uniq.length - 1];
+    if (q.getLat() !== r.getLat() || q.getLng() !== r.getLng()) uniq.push(q);
+  }
+  if (uniq.length < 2) return null;
+  while (uniq.length < MIN_PATH_PTS) {          // 去重可能又把它削回 2 点
+    const a = uniq[0], b = uniq[uniq.length - 1];
+    uniq.splice(1, 0, new TMap.LatLng((a.getLat() + b.getLat()) / 2,
+                                      (a.getLng() + b.getLng()) / 2));
+  }
+  return { id: g.id, styleId: styleId || g.styleId, paths: uniq };
+}
+
+//: 批量净化 + 丢掉空几何；全空返回 null（调用方就别建图层了）。
+function safeGeoms(list, styleId) {
+  const out = [];
+  for (const g of list || []) {
+    const s = safeGeom(g, styleId);
+    if (s) out.push(s);
+  }
+  return out.length ? out : null;
+}
+
+// ---- 3.1 历史轨迹（到当前帧为止） ----------------------------------------
+function renderTrails(i) {
+  clearLayer('trails');
+  if (!$('l_trail').checked) return;
+  const upto = S.frames.slice(0, i + 1);
+  const geoms = [];
+  const ids = Object.keys(S.data.entities);
+  for (const id of ids) {
+    const eid = Number(id);
+    const pts = [];
+    for (const fr of upto) {
+      const e = (fr.entities || []).find(x => x.entity_id === eid);
+      if (e && e.lat != null && e.lng != null) pts.push(new TMap.LatLng(e.lat, e.lng));
+    }
+    if (pts.length < 2) continue;
+    geoms.push({ id: 'tr' + eid, styleId: 'tr', path: pts });
+  }
+  if (!geoms.length) return;
+  // 轨迹按阵营上色，所以按 side 分组各建一个图层
+  const bySide = {};
+  for (const g of geoms) {
+    const eid = Number(g.id.slice(2));
+    const side = (S.data.entities[eid] || {}).side || '?';
+    (bySide[side] = bySide[side] || []).push(g);
+  }
+  S.layers.trails = [];
+  for (const [side, gs] of Object.entries(bySide)) {
+    // ★ 历史轨迹本身就是实体走过的真实航迹点串，**不需要**再插值加密
+    //   （相邻采样点已经很密）。加密反而会让点数爆炸（600 s 想定 × 每帧
+    //   一次）。这里保持原样直连。
+    const clean = safeGeoms(gs, 'tr');
+    if (!clean) continue;
+    const style = new TMap.PolylineStyle({
+      color: sideColor(side), width: 3, opacity: 0.35, lineCap: 'round' });
+    const layer = new TMap.MultiPolyline({
+      map, zIndex: 5, styles: { tr: style }, geometries: clean });
+    S.layers.trails.push(layer);
+  }
+}
+// ---- 3.2 实体（圆点 + 航向短线 + 名字） -----------------------------------
+function renderEntities(f) {
+  clearLayer('entities'); clearLayer('labels');
+  const geoms = [], labels = [];
+  for (const e of f.entities || []) {
+    if (e.lat == null || e.lng == null) continue;
+    const pos = new TMap.LatLng(e.lat, e.lng);
+    geoms.push({ id: 'e' + e.entity_id, styleId: e.side, position: pos });
+    if ($('l_label').checked) {
+      // ★ 字段名是 ``content`` 不是 ``text``：腾讯 MultiLabel 的
+      //   LabelGeometry 只认 content，写 text 会被 SDK 判为无效几何并
+      //   在 console 报"content 属性无效"，**标签一个都不显示**。
+      labels.push({ id: 'lb' + e.entity_id, styleId: 'lb', position: pos,
+                    content: e.name });
+    }
+  }
+  const styles = {};
+  for (const s of ['red', 'blue']) {
+    styles[s] = new TMap.MarkerStyle({
+      width: 16, height: 16, anchor: { x: 8, y: 8 },
+      // 用内联 SVG 画圆点（合规要求：不引用官方 demo 图片）
+      src: 'data:image/svg+xml,' + encodeURIComponent(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">' +
+        '<circle cx="8" cy="8" r="6" fill="' + sideColor(s) +
+        '" stroke="#fff" stroke-width="1.5"/></svg>'),
+    });
+  }
+  if (geoms.length) {
+    S.layers.entities = new TMap.MultiMarker({
+      map, zIndex: 8, styles, geometries: geoms });
+  }
+  if (labels.length && $('l_label').checked) {
+    S.layers.labels = new TMap.MultiLabel({
+      map,
+      zIndex: 9,
+      styles: { lb: new TMap.LabelStyle({
+        color: '#e6edf3', size: 11, offset: { x: 0, y: 12 },
+        backgroundColor: 'rgba(13,17,23,0.7)', padding: '1px 4px',
+        borderRadius: 3 }) },
+      geometries: labels,
+    });
+  }
+}
+
+// ---- 3.3 探测关联线（观察者 → 目标） -------------------------------------
+// ★ 这条线是什么：雷达"哪台机器看见了哪个目标"的**关联关系**——
+//   从观察者（传感器）连到它报出来的目标位置。**不是**目标自己的
+//   飞行轨迹（那是最早的"历史轨迹"层）。用 CMO 的**大圆插值**（§0）
+//   加密：这种线动辄几百公里，直连是弦，在球面上会明显偏离真实视线方向。
+//   断线用**屏幕空间虚线**，缩放时不走样。
+function renderContacts(f) {
+  clearLayer('contacts');
+  if (!$('l_contact').checked) return;
+  const posOf = {};
+  for (const e of f.entities || []) {
+    if (e.lat != null) posOf[e.entity_id] = new TMap.LatLng(e.lat, e.lng);
+  }
+  const own = [], friend = [];
+  for (const c of f.contacts || []) {
+    const a = posOf[c.from], b = posOf[c.to];
+    if (!a || !b) continue;
+    const path = densifyPath(
+      [{ lat: a.getLat(), lng: a.getLng() }, { lat: b.getLat(), lng: b.getLng() }],
+      'ortho');   // 大圆
+    (c.same_side ? friend : own).push({
+      id: 'c' + c.from + '_' + c.to, styleId: c.same_side ? 'f' : 'o',
+      path: path.map(p => new TMap.LatLng(p.lat, p.lng)) });
+  }
+  const mk = (gs, style) => {
+    const clean = safeGeoms(gs, 'p');
+    return clean ? new TMap.MultiPolyline({
+      map, zIndex: 6, styles: { p: style }, geometries: clean }) : null;
+  };
+  const ownStyle = new TMap.PolylineStyle({ color: CONTACT_COLOR, width: 2,
+    opacity: 0.65, borderWidth: 0 });
+  const friStyle = new TMap.PolylineStyle({ color: CONTACT_FRIEND, width: 1,
+    opacity: 0.4, borderWidth: 0 });
+  S.layers.contacts = [mk(own, ownStyle), mk(friend, friStyle)].filter(Boolean);
+}
+function renderContactsStyleFix() { /* 占位：见上方统一构建 */ }
+
+// ---- 3.4 通信链路（实线=通，虚线=断） ------------------------------------
+// ★ "断"的虚线用 CMO 的**屏幕空间**策略（§0）：按投影后的像素长度等分、
+//   隔段取实。这样缩放时虚线的疏密恒定，不会"放大就变实线"。
+//   链路每帧都在动，所以每帧重算投影——这正是屏幕空间虚线的正确用法。
+function renderComm(f) {
+  clearLayer('comm');
+  if (!$('l_comm').checked) return;
+  const com = f.comm || {};
+  const posOf = {};
+  for (const e of f.entities || []) {
+    if (e.lat != null) posOf[e.entity_id] = new TMap.LatLng(e.lat, e.lng);
+  }
+  const up = [], down = [];
+  for (const ed of com.edges || []) {
+    const a = posOf[ed.from], b = posOf[ed.to];
+    if (!a || !b) continue;
+    // 有向边去重：只画一次（from<to），免得双向叠成一条
+    if (ed.from > ed.to) continue;
+    const ala = a.getLat(), alo = a.getLng();
+    const bla = b.getLat(), blo = b.getLng();
+    if (ed.up) {
+      // 通：实线。链路按大圆加密（长链路在球面上是弧）
+      const path = densifyPath([{ lat: ala, lng: alo }, { lat: bla, lng: blo }], 'ortho');
+      up.push({ id: 'n' + ed.from + '_' + ed.to, styleId: 'u',
+                path: path.map(p => new TMap.LatLng(p.lat, p.lng)) });
+    } else {
+      // 断：屏幕空间虚线，一段一条
+      const segs = screenSpaceDash(ala, alo, bla, blo, DASH_PX);
+      segs.forEach((s, k) => down.push({
+        id: 'd' + ed.from + '_' + ed.to + '_' + k, styleId: 'd',
+        path: s.map(p => new TMap.LatLng(p.lat, p.lng)) }));
+    }
+  }
+  const layers = [];
+  const upClean = safeGeoms(up, 'u');
+  if (upClean) layers.push(new TMap.MultiPolyline({ map, zIndex: 6,
+    styles: { u: new TMap.PolylineStyle({ color: COMM_UP, width: 2,
+      opacity: 0.85, borderWidth: 0 }) }, geometries: upClean }));
+  const dnClean = safeGeoms(down, 'd');
+  if (dnClean) layers.push(new TMap.MultiPolyline({ map, zIndex: 6,
+    styles: { d: new TMap.PolylineStyle({ color: COMM_DOWN, width: 2,
+      opacity: 0.85, borderWidth: 0 }) }, geometries: dnClean }));
+  S.layers.comm = layers;
+}
+
+// ---- 3.5 干扰关系（施扰端 → 受害端） -------------------------------------
+// 回放文件里 jammers 只有"谁有干扰能力"，没有"在压谁"。受害人从 sensors
+// 那一层的 jamming_w>0 读出来——**这正是"被压制"最直接的证据**。
+// ★ 用 CMO 的屏幕空间虚线画"压制关系"：这条线表达的是"作用中"而非
+//   "一条确定的观测视线"，虚线更贴语义；且屏幕空间保证缩放不走样。
+function renderJammers(f) {
+  clearLayer('jam');
+  if (!$('l_jam').checked) return;
+  const posOf = {};
+  for (const e of f.entities || []) {
+    if (e.lat != null) posOf[e.entity_id] = new TMap.LatLng(e.lat, e.lng);
+  }
+  const sources = new Set((f.jammers || []).map(j => j.entity_id));
+  const victims = (f.sensors || []).filter(s => s.jamming_w > 0);
+  if (!sources.size || !victims.length) return;
+
+  const geoms = [];
+  for (const v of victims) {
+    const b = posOf[v.entity_id];
+    if (!b) continue;
+    for (const s of sources) {
+      const a = posOf[s];
+      if (!a) continue;
+      const segs = screenSpaceDash(a.getLat(), a.getLng(),
+                                   b.getLat(), b.getLng(), DASH_PX);
+      segs.forEach((seg, k) => geoms.push({
+        id: 'j' + s + '_' + v.entity_id + '_' + k, styleId: 'j',
+        path: seg.map(p => new TMap.LatLng(p.lat, p.lng)) }));
+    }
+  }
+  const clean = safeGeoms(geoms, 'j');
+  if (!clean) return;
+  S.layers.jam = new TMap.MultiPolyline({ map, zIndex: 7,
+    // ★ width 整数（见 buildGridLayer 处注释：小数宽度被 SDK 整层拒画）
+    styles: { j: new TMap.PolylineStyle({ color: JAM_COLOR, width: 3,
+      opacity: 0.9, borderWidth: 0 }) },
+    geometries: clean });
+}
+
+// ===========================================================================
+// 4. 右侧信息面板
+// ===========================================================================
+
+function renderInfo(f) {
+  // 统计
+  const ent = f.entities || [];
+  const alive = ent.filter(e => e.alive).length;
+  const cont = f.contacts || [];
+  const enemy = cont.filter(c => !c.same_side).length;
+  const routed = cont.filter(c => c.hops >= 1).length;
+  const nets = (f.comm && f.comm.networks) || [];
+  const offline = (f.comm && f.comm.offline) || [];
+  const jams = f.jammers || [];
+  const radars = f.sensors || [];
+  const jammed = radars.filter(s => s.jamming_w > 0).length;
+
+  const kpis = [
+    ['实体 / 存活', alive + ' / ' + ent.length],
+    ['航迹（敌 / 转发）', enemy + ' / ' + routed],
+    ['通信网 / 掉线', nets.length + ' / ' + offline.length],
+    ['干扰源 / 被压雷达', jams.length + ' / ' + jammed],
+  ];
+  $('kpis').innerHTML = kpis.map(([k, v]) =>
+    `<div class="kpi"><span class="muted">${k}</span><b>${v}</b></div>`).join('');
+
+  // 通信网
+  if (!nets.length) { $('nets').innerHTML = '<span class="muted">（无）</span>'; }
+  else {
+    const nodes = f.comm.nodes || [];
+    $('nets').innerHTML = nets.map(n =>
+      `<div class="kpi"><span>${n}</span><b>${nodes.length} 节点` +
+      (offline.length ? ` <span style="color:${COMM_DOWN}">-${offline.length}</span>` : '') +
+      `</b></div>`).join('');
+  }
+
+  // 干扰天线
+  if (!jams.length) { $('jams').innerHTML = '<span class="muted">（无）</span>'; }
+  else {
+    $('jams').innerHTML = jams.map(j => {
+      const nm = (S.data.entities[j.entity_id] || {}).name || ('#' + j.entity_id);
+      return `<div class="kpi"><span>${nm}</span><b>${(j.power_w / 1000).toFixed(1)} kW ` +
+        `<span class="muted">${(j.frequency_hz / 1e9).toFixed(2)} GHz</span></b></div>`;
+    }).join('');
+  }
+
+  // 雷达读数（这一帧）
+  if (!radars.length) { $('radars').innerHTML = '<span class="muted">（无）</span>'; }
+  else {
+    $('radars').innerHTML = radars.map(s => {
+      const nm = (S.data.entities[s.entity_id] || {}).name || ('#' + s.entity_id);
+      const hit = s.jamming_w > 0;
+      return `<div class="kpi"><span>${nm}` +
+        (hit ? ` <span class="tag" style="background:#4a2326;color:#ff9d9d">被压</span>` : '') +
+        `</span><b>Pd ${Number(s.last_pd).toFixed(3)}</b></div>` +
+        `<div class="kpi" style="background:transparent;padding-top:0">` +
+        `<span class="muted" style="font-size:11px">探测 ${s.detections} · 扫 ${s.sweeps.toFixed(1)} 圈` +
+        (hit ? ` · 干扰 ${(s.jamming_w * 1e6).toFixed(1)} µW` : '') +
+        `</span></div>`;
+    }).join('');
+  }
+}
+
+function renderLegend() {
+  const L = S.data.legend || {};
+  const lines = [];
+  if (L.sides) {
+    for (const [k, v] of Object.entries(L.sides)) {
+      lines.push(`<span class="dot" style="display:inline-block;background:${v.color}"></span> ${v.label}`);
+    }
+  }
+  const extra = [
+    ['#E0A458', '敌探测关联（虚线）'],
+    ['#6e7681', '友探测关联（细虚）'],
+    ['#3FB950', '通信通'],
+    ['#E24B4A', '通信断 / 干扰'],
+  ];
+  $('legendtxt').innerHTML = lines.join(' · ') + '<br>' +
+    extra.map(([c, t]) => `<span class="dot" style="display:inline-block;background:${c}"></span> ${t}`).join('<br>');
+}
+
+// ---- 实体清单（点击定位） --------------------------------------------------
+function buildEntityList() {
+  const d = S.data;
+  const ids = Object.keys(d.entities).map(Number).sort((a, b) => a - b);
+  const html = ids.map(id => {
+    const e = d.entities[id];
+    return `<div class="kpi" data-eid="${id}" style="cursor:pointer">` +
+      `<span><span class="dot" style="display:inline-block;background:${sideColor(e.side)}"></span> ` +
+      `${e.name}</span><b class="muted" style="font-size:11px">${e.type_name}</b></div>`;
+  }).join('');
+  $('entlist').innerHTML = html;
+  for (const el of $('entlist').querySelectorAll('[data-eid]')) {
+    el.onclick = () => {
+      const eid = Number(el.dataset.eid);
+      const f = S.frames[S.frame];
+      const e = (f.entities || []).find(x => x.entity_id === eid);
+      if (e && e.lat != null) map.setCenter(new TMap.LatLng(e.lat, e.lng));
+    };
+  }
+}
+
+// ===========================================================================
+// 5. 时间轴控制
+// ===========================================================================
+
+function setPlaying(on) {
+  S.playing = on;
+  $('play').textContent = on ? '⏸ 暂停' : '▶ 播放';
+  $('play').classList.toggle('on', on);
+  if (S.timer) { clearInterval(S.timer); S.timer = null; }
+  if (!on || S.frames.length < 2) return;
+  // ★ 播放节拍**不等于采样间隔**（v0.13.49 更正）。旧版按"采样间隔 ÷ 倍速"
+  //   走"真实时间轴"：20 s 采样的一场上按播放键，一帧要等 20 s——进度条
+  //   看上去就是"没反应"。回放帧是**采样点**不是动画帧：固定 ~0.4 s/帧
+  //   （× 倍速），24 帧一场十来秒播完，拖动/单步照旧逐帧。
+  const tick = Math.max(30, Math.round(400 / S.speed));
+  S.timer = setInterval(() => {
+    if (S.frame >= S.frames.length - 1) {
+      setPlaying(false);
+      // 实时推流里追平了已到的帧 ⇒ 恢复跟随（新一帧到就接着走），
+      // 而不是像跑完的回放那样停在原地。
+      if (S.live && !S.liveDone) {
+        S.liveFollow = true;
+        showNote('已追上实时——恢复跟随推流');
+      }
+      return;
+    }
+    render(S.frame + 1);
+  }, tick);
+}
+
+function bindControls() {
+  $('play').onclick = () => {
+    // 实时推流里人本来就在"头一帧"上：这时按播放是"恢复跟随"，
+    // 不是"从当前帧播"——旧版在这里立刻判到"已是最后一帧"就停表，
+    // 按钮闪一下回原样，进度条看着毫无反应（用户实测踩到）。
+    if (S.live && !S.liveDone && S.frame >= S.frames.length - 1) {
+      S.liveFollow = true;
+      setPlaying(false);
+      showNote('实时跟随中——新一帧到达即刷新');
+      return;
+    }
+    setPlaying(!S.playing);
+  };
+  $('prev').onclick = () => { setPlaying(false); stepTo(S.frame - 1); };
+  $('next').onclick = () => { setPlaying(false); stepTo(S.frame + 1); };
+  $('slider').oninput = (e) => {
+    // 手动拖动 ⇒ 退出"跟最新帧"，否则用户刚往回看一眼就被下一拍拽回去
+    if (S.live) S.liveFollow = false;
+    setPlaying(false);
+    render(Number(e.target.value));
+  };
+  $('speedsel').onchange = (e) => {
+    S.speed = Number(e.target.value);
+    if (S.playing) setPlaying(true);
+  };
+  $('scen').onchange = () => reloadCurrent();
+  for (const el of document.querySelectorAll('input[name="src"]')) {
+    el.onchange = () => reloadCurrent();
+  }
+  for (const k of ['l_entity', 'l_trail', 'l_contact', 'l_comm', 'l_jam',
+                   'l_grid', 'l_label']) {
+    $(k).onchange = () => {
+      if (k === 'l_grid') buildGridLayer();
+      render(S.frame);
+    };
+  }
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key === ' ') { ev.preventDefault(); setPlaying(!S.playing); }
+    else if (ev.key === 'ArrowLeft') { setPlaying(false); stepTo(S.frame - 1); }
+    else if (ev.key === 'ArrowRight') { setPlaying(false); stepTo(S.frame + 1); }
+  });
+}
+
+//: 单步/回退。实时模式下往回看是允许的（帧已经在本地了），
+//: 但**不能往前越过已到达的帧**——那还不存在。
+function stepTo(i) {
+  const hi = S.frames.length - 1;
+  if (S.live && i >= hi) S.liveFollow = true;   // 拖到头上 ⇒ 恢复跟随
+  render(Math.max(0, Math.min(hi, i)));
+}
+
+// ---- 提示条 --------------------------------------------------------------
+let noteTimer = null;
+function showNote(msg, isErr) {
+  const el = $('note');
+  el.textContent = msg;
+  el.classList.toggle('err', !!isErr);
+  el.classList.add('show');
+  if (noteTimer) clearTimeout(noteTimer);
+  if (!isErr) noteTimer = setTimeout(hideNote, 1800);
+}
+function hideNote() { $('note').classList.remove('show'); }
+
+// ===========================================================================
+// 6. 启动
+// ===========================================================================
+
+function boot() {
+  fillScenarioSelect();
+  bindControls();
+  initMap();
+  // 默认走离线文件（不需要服务端也能看）。服务端给的页面上，
+  // 左栏点一下「实时推流」就切过去。
+  loadReplay(SCENARIOS[0].file);
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', boot);
+} else {
+  boot();
+}
+</script>
+</body>
+</html>

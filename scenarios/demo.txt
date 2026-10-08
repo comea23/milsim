@@ -1,0 +1,124 @@
+# 示例想定：一个防空营在北线战区展开
+#
+# 这份文件同时是语法示例与端到端测试的输入。改它要顺手跑一遍
+# tests/test_scenario.py，里面的断言依赖它的内容。
+
+# ---- 全局设置 ----
+simulation
+    name     "北线防空"
+    max_step 2 s                  # 引擎硬约束：单次推进不超过 2 秒
+    seed     20260917
+end_simulation
+
+# ---- 组件类型（想定层只管参数值，算法在代码层的同名组件类里）----
+component_type RADAR_BASE
+    scan_interval 2 s
+    track_capacity 40
+end_component_type
+
+component_type HEX_SEARCH_RADAR : RADAR_BASE
+    detect_range  40 km
+    # fov 从 v0.13.24 起生效：120° = 扫描视场 ⇒ 扇区扫描（中心看 scan_center，
+    # 不写就是正北）。360° 或省略才是圆周搜索。下面两行是语法示例，不是本
+    # 想定要用的值——这份文件是【语法示例】，直接跑会报组件参数不匹配。
+    fov           120 deg
+    frequency     9.4 GHz
+    modes         [SARH, IR]
+end_component_type
+
+# ---- 平台类型 ----
+# 平台属性有参数表（§5.6），所以属性名写错会报错并给拼写建议。
+# 但表里只有**真的有人读**的那几个键：阵营、决策配置名。最高速度不在这
+# ——它属机动件（component mover），放两份迟早不同步。
+platform_type BASE_UNIT
+    side          red
+end_platform_type
+
+platform_type SAM_BATTALION : BASE_UNIT
+    # 营属雷达：探测距离比标准型远 50%
+    component sensor HEX_SEARCH_RADAR
+        detect_range 60 km
+    end_component
+end_platform_type
+
+# ---- 战区（只是声明，装配时才按需加载网格）----
+zone NORTH_FRONT
+    anchor     39.9042 116.4074
+    radius     120 km
+    resolution 100 m
+    layers     3
+    terrain    procedural seed=42
+end_zone
+
+# ---- 决策配置 ----
+decision RULE_DEFAULT
+    provider rule
+end_decision
+
+decision TACTICAL_LLM
+    provider    llm
+    model       "deepseek-chat"
+    endpoint    "https://api.deepseek.com/v1"
+    # 只写环境变量名，密钥本身绝不进想定文件
+    api_key_env "MILSIM_LLM_KEY"
+    timeout     8 s
+    cadence     30 s
+    fallback    RULE_DEFAULT
+    max_context 4096
+    temperature 0.2
+    prompt      "prompts/battalion_commander.txt"
+end_decision
+
+# ---- 编队：行政隶属（第一层）----
+#
+# 父级用块头冒号表示，与 `component_type X : Y` 同一套写法。
+# 平铺而不是嵌套——嵌套要每层配对 end_，四层就要写八个，错一个就炸。
+# 平铺还有个好处：支持前向引用，先写连、后写营也认。
+formation RED_ADE
+    side    red
+    echelon 旅
+end_formation
+
+formation RED_SAM_BN : RED_ADE
+    side    red
+    echelon 营
+end_formation
+
+formation RED_SAM_1 : RED_SAM_BN
+    side    red
+    echelon 连
+end_formation
+
+formation RED_SAM_2 : RED_SAM_BN
+    side    red
+    echelon 连
+end_formation
+
+# ---- 指挥关系：作战调整（第二、三层）----
+#
+#   attach     改接作战归属（行政隶属不动），到期自动归建
+#   direct     直接指挥通道（越级）
+#   coordinate 协同，对等，不产生指挥方向
+#
+# 不写 from / until 就是全程。时间是相对想定起点的时长，没有绝对时刻。
+command
+    # 二号连配属给旅直属，4 小时后归建
+    attach RED_SAM_2 to RED_ADE from 2 h until 4 h
+    # 协同：两个连互相支援
+    coordinate RED_SAM_1 with RED_SAM_2
+end_command
+
+# ---- 平台实例 ----
+platform SAM_1 SAM_BATTALION
+    position latlng 39.95 116.35
+    heading  45 deg
+    formation RED_SAM_1            # 编队归属是实例属性（同 position）
+    decision TACTICAL_LLM         # 一号阵地由大模型驱动
+end_platform
+
+platform SAM_2 SAM_BATTALION
+    # 网格坐标相对战区锚点，必须落在战区半径内。只有一个战区时 @ zone 可省。
+    position hex 100 60 @ layer 0
+    heading  120 deg
+    formation RED_SAM_2
+end_platform

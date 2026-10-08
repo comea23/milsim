@@ -1,0 +1,52 @@
+# 参数库调用演示：平台参数**全部来自库**，想定里只写型号名（§5.5）。
+#
+# 跑它要带 --library：
+#
+#   python tools/run_scenario.py scenarios/library_demo.txt \
+#       --library library/demo_models.db --seconds 200
+#
+# 对比 scenarios/patrol.txt：那份把探测距离、扫描周期、最高速度都写在
+# 想定里，同一型雷达换一份想定就要抄一遍。参数库把"值"收走，想定只留
+# "用哪个型号"——于是"这型雷达到底多远"只有一个答案。
+
+simulation
+    name     "参数库调用"
+    max_step 2 s
+    seed     20260917
+end_simulation
+
+# ---- 平台类型：靠库里的型号拼出来，一个参数都不写 ----------------------
+
+platform_type RED_RECON : RECON_VEHICLE
+    side red
+    component mover  MOVER_WHEELED
+    end_component
+    component sensor RADAR_SEARCH_S      # 中程搜索雷达（60 km / 2 s）
+    end_component
+end_platform_type
+
+platform_type BLUE_TANK : TANK_MBT
+    side blue
+    component mover  MOVER_TRACKED
+    end_component
+end_platform_type
+
+# ---- 战区 ---------------------------------------------------------------
+
+zone EAST_SECTOR
+    anchor     39.9042 116.4074
+    radius     60 km
+    resolution 200 m
+end_zone
+
+# ---- 实例：两车相向，间距约 18 km，都在库里那型雷达的覆盖内 ------------
+
+platform RED_1 RED_RECON
+    position latlng 39.9042 116.3100
+    heading  90 deg
+end_platform
+
+platform BLUE_1 BLUE_TANK
+    position latlng 39.9042 116.5100
+    heading  270 deg
+end_platform

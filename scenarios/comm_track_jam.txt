@@ -1,0 +1,170 @@
+# 多组件组合演示：探测 → 通信传航迹 → 引导干扰
+#
+# ★ 本想的全部意义：把"**航迹经通信件传给干扰机、干扰机照它置向**"这条
+#   跨三个部件的链路，在**一份能跑的想定**上串起来——此前这条链从没被
+#   端到端跑过（`tests/` 里 `share_recipients` 与 `network` 的交集为零，
+#   转发用例全部手写 `store.deliver_due()` 绕过通信件；`comm_demo.txt` 的
+#   10 个平台没有一台挂 `TRACK_MANAGER`）。
+#
+#   链路四段（每段都有可观察的计数，见 README 的四个中间量）：
+#     ① **探测**：`SCOUT` 的雷达探到红方目标 ⇒ 本机航迹表里有一条敌航迹；
+#     ② **传航迹**：`SCOUT` 的 `TRACK_MANAGER` 走 `share_recipients` 把航迹
+#        写进**在途队列**，`RF_COMM` 按拍把它搬进 `JAMMER` 的收件箱
+#        （**到点 ≠ 通**：不通就留队等下一拍）；
+#     ③ **置向**：`JAMMER` 的 `TRACK_MANAGER` `absorb()` 航迹 ⇒ 它自己那张
+#        航迹表里有了敌航迹 ⇒ `RF_JAMMER` 的 `aim_at nearest` **挑得到**；
+#     ④ **压制**：受害方 `RED_RADAR` 算 `S/(N+J)`，不过门限 ⇒ 这一拍从拓扑
+#        上摘掉，或被压制（探测器那条路看 `Pd` 掉）。
+#
+# ★ 三个部件互不 import，也不共享内部状态：`TRACK_MANAGER` 只知道
+#   `EntityStore`（写 `_inflight` 在途队列 / 读收件箱），`RF_COMM` 只知道
+#   拓扑与投递，`RF_JAMMER` 只知道"我有一张航迹表"。**这条链能通是因为
+#   它们各自的公开契约对得上，不是因为有人把它们连在一起写**。
+#
+# ★ 默认档零回归：`share_interval 0`（默认）⇒ 不转发 ⇒ 在途队列永远为空
+#   ⇒ 与加 `TRACK_MANAGER` 之前逐字相同。要它做事必须显式开。
+
+simulation
+    name     "探测传航迹引导干扰"
+    max_step 2 s
+    seed     20260929
+end_simulation
+
+# ---- 侦察机：雷达 + 航迹汇聚 + 转发（环节①②）----
+# ★ `share_recipients` 用**名字**而不是编号：想定作者写的是"共享给谁"，
+#   不是"共享给实体 7"。
+# ★ `share_interval 10 s` 是转发节拍；与 `RF_COMM` 的 `period 2 s` 是两件事
+#   （一个决定"多久发一批"，一个决定"多久搬一次报文"）。
+platform_type SCOUT_NODE
+    side blue
+    component mover AIR_MEDIUM
+    end_component
+    component sensor HEX_SEARCH_RADAR
+    end_component
+    component track TRACK_MANAGER
+        share_interval   10 s
+        share_recipients [JAMMER_1]
+    end_component
+    component comm RF_COMM
+    end_component
+end_platform_type
+
+# ---- 干扰机：收航迹（环节③）+ 照航迹置向（环节④）----
+# ★ 它**自己不带雷达**：它那张航迹表里的敌航迹**只能**从通信件来。
+#   这正是本想要演的事——把"航迹怎么到它手上"这件事从"自带探测"里摘出来。
+# ★ `aim_at nearest` 读的是**本机航迹表**；表空 ⇒ 不辐射（§5.14.11 ④）。
+# ★ `beam_width_deg 0` ⇒ 不启用连续方向图，主瓣那道筛不参与
+#   （`_aim_offset_deg` 里 `beam_width_deg > 0` 才判主瓣）。
+platform_type JAMMER_NODE
+    side blue
+    component mover AIR_MEDIUM
+    end_component
+    component track TRACK_MANAGER
+    end_component
+    component jammer RF_JAMMER
+        peak_power       100 kW
+        frequency        4 GHz
+        antenna_gain_db  30
+        aim_at           nearest
+    end_component
+    component comm RF_COMM
+    end_component
+end_platform_type
+
+# ---- 红方目标：被侦察机探测 ----
+platform_type RED_TARGET_NODE
+    side red
+    component mover AIR_MEDIUM
+    end_component
+end_platform_type
+
+# ---- 红方受害雷达：被干扰机压制 ----
+# ★ 它的干扰口径就是"我这部接收机多抗干扰"（§5.14 一张表）：
+#   `peak_power` 与 `noise_power` 给出名义 S/N；`frequency` / `bandwidth`
+#   决定干扰进不进得来（`F_BW`）；**门限是 `required_pd`**（雷达侧的名字，
+#   通信侧才叫 `required_snr_db`）。
+#   ★ 参数名是 `peak_power` / `required_pd` —— 写成 `power` / `required_snr_db`
+#     会在装配期报未知参数（实测踩过）。
+#   ★ **不给 `noise_power`**：雷达侧噪声走"天线噪声温度 + 馈线损耗 + 噪声系数"
+#     那条链（Blake 级联），再给一个 `noise_power` 是同一个量两个出处，
+#     装配期直接报错（实测踩过）。
+# ★ `peak_power` 给得**很小**（100 W）是故意的：让 J 相对 S 大，压制看得见。
+#   `S/(N+J)` 与 `noise_power` 无关（J≫N 时 → S/J），所以噪声不是旋钮。
+platform_type RED_RADAR_NODE
+    side red
+    component sensor HEX_SEARCH_RADAR
+        peak_power      50 MW
+        antenna_gain_db 6
+        frequency       4 GHz
+        bandwidth       2 MHz
+        required_pd     0.5
+    end_component
+end_platform_type
+
+# ---- 机动（v0.13.49）：红蓝平台各挂一个空中运动件 --------------------------
+# ★ 运动件只给"能力"，不给"任务"：目的地是**运行期**下达的东西（§5.7/M5a
+#   的裁定，与 mover_demo 同一条），想定里**不写**命令。推流/导出侧用
+#   ``--demo mover`` 下达：每台沿当前航向 10 km → 左转 60° 再 6 km 的
+#   两段航线（见 tools/export_replay.py 的通用档）。
+# ★ 三台同一个型号、速度相同是有意的：SCOUT 与 RED_TGT 走**平移同形**的
+#   航线 ⇒ 相对几何不变，探测链不会因为机动掉线；JAMMER 与 RED_RADAR
+#   拉开的距离是全场唯一变化的量（压制余量随之变化，可看动态）。
+# ★ RED_RADAR_1 是地面雷达站，**不**挂运动件——它的 z 恒为地形高程。
+# ★ 战区没有地形画像（latlng 锚点 + 半径，无 terrain 块）⇒ 只能挂空中件：
+#   空中件的运动学不查地貌，陆/水件在这种战区里无路可寻。
+component_type AIR_MOVER
+end_component_type
+
+component_type AIR_MEDIUM : AIR_MOVER
+    max_speed       100 m/s
+    turn_rate       12 deg/s
+    radial_accel    9.4 m/s2
+    cruise_altitude 3000 m
+end_component_type
+
+# ---- 战区 ----
+# ★ 战区是**必须**的（§9-55）：没有 `zone` 的话所有 `latlng` 会静默变成
+#   (0,0,0)，平台全叠原点 ⇒ `JamService._eligible` 那道"两台机不可以同处
+#   一点"的筛会把整台名册跳过去，症状是"干扰机挂着、一点用没有"。
+zone LINK_SECTOR
+    anchor     39.9042 116.4074
+    radius     40 km
+    resolution 500 m
+    layers     1
+end_zone
+
+# ---- 通信网（环节②的载体）----
+# ★ `LINK_NET` 两个成员：侦察机与干扰机。**入网默认 mesh 全连通**
+#   （`links` 为空 ⇒ 完备图）⇒ 两跳之内直发。
+# ★ 干扰机的 `status red-radar` 挂的是 `jammer` 件、不是 `RF_COMM`，
+#   它**不写进 member**（`RF_COMM` 才需入网），但 `SCOUT` 的
+#   `share_recipients` 点了它的名 ⇒ 装配期 `_auto_join_networks` 会把它
+#   并进 `JAMMER_1` 所在的那个网（§5.15 裁定③"单边发信自动入网"）。
+network LINK_NET
+    member SCOUT_1 JAMMER_1
+end_network
+
+# ---- 实例 ----
+# 侦察机在锚点西南约 8 km；红方目标在它东北约 6 km（进雷达量程）。
+platform SCOUT_1 SCOUT_NODE
+    position latlng 39.8600 116.3600
+    heading  90 deg
+end_platform
+
+# 干扰机在锚点东南约 7 km（与侦察机相距约 10 km，网内直发）。
+platform JAMMER_1 JAMMER_NODE
+    position latlng 39.8700 116.4600
+    heading  90 deg
+end_platform
+
+# 红方目标：在侦察机东北约 6 km（方位 45°、斜距 ~5.9 km ⇒ 雷达量程内）。
+platform RED_TGT_1 RED_TARGET_NODE
+    position latlng 39.9000 116.4100
+    heading  90 deg
+end_platform
+
+# 红方受害雷达：在干扰机东北约 4.4 km。
+platform RED_RADAR_1 RED_RADAR_NODE
+    position latlng 39.9000 116.5100
+    heading  90 deg
+end_platform

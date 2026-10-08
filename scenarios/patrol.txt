@@ -1,0 +1,130 @@
+# 巡逻遭遇：一艘红军巡逻艇与两艘蓝军目标艇在同一片水域
+#
+# ★ 为什么是"艇"不是"车"：这片战区的地形**基本是水**。实测半径 10.4 km 内
+#   2791 格里只有 99 格既是陆地又可通行（3.5%），连锚点格自己都是高程
+#   −5.16 m 的水面。把地面车摆进来只有两种下场，两种都不是"探测链走不通"，
+#   而是"这个想定这片地形上不成立"：
+#     ① 站在海床上（格高程 −375 m，地貌写着"水域"，A* 直接判"这类运载器
+#        走不了"）；
+#     ② 站在岸上，但 1 km 外就有一道 +34 m 的岸线把 2 km 以外全部挡死。
+#   水面件恒取海平面 0 m（§9 第 13 条），与感知层 `terrain_floor = 0.0` 的
+#   口径**逐位一致**，几何里没有任何"埋在地下"的假象。
+#
+# 机动件用框架的参考实现（WATER_MOVER，§5.7）；感知件是 M4a 的参考实现
+# （HEX_SEARCH_RADAR，models/percep/）：扫描律 + 几何（地平线/通视）+ 雷达
+# 方程 + 检测概率（**默认非起伏**，固定 RCS；写 `swerling_case 1` 才走
+# Swerling 1，见 §9-73）+ M/N 建航。
+#
+# 注意最高速度只写在机动件上。平台属性表里没有 max_speed：平台与组件各存
+# 一份速度，等于同一件事有两个真相，两份数字迟早不同步。
+
+simulation
+    name     "巡逻遭遇"
+    max_step 2 s
+    seed     20260917
+end_simulation
+
+# ---- 组件类型 ----
+# 扇扫 120°、中心 270°（正西）。红艇的 heading 也是 270°，所以这是**朝前扇扫**
+# 的车载雷达，不是转圈搜索。
+#
+# ★ 第 4 步的三个上界在这里各司其职——这是本想的全部意义：
+#
+#   detect_range   8 km  **功率**上界：8 km 处单次扫描的 Pd 恰好等于
+#                        required_pd = 0.5（标定法的定义，见 percep/base.py
+#                        模块头）。于是建航过程本身是可见的，不是一照就亮。
+#                        ★ 该等式在**默认非起伏**口径下逐位成立（Pd(8000 m)
+#                        = 0.5000000002）；旧 Swerling 1 口径下 8 km 处是
+#                        0.5054（两口径门槛差 1.53 dB，见 §9-73）。
+#   max_range     20 km  **搜索**上界：**故意大于地平线**，好让几何成为真正
+#                        的限制。把它设成 8 km 的话，15 km 那艘会在第 3 步就
+#                        被距离门拦掉，第 4 步做了什么就看不出来了。
+#   antenna_height 10 m  **几何**上界：无线电地平线 = 4.1218·√10 = 13 034.3 m
+#                        （目标高度 0 对地平线没有贡献）。它既不等于 8 km 也
+#                        不等于 20 km，是第三个、也是唯一与功率无关的上界。
+#
+# ★ 架高不是凑数，是口径：地平线全靠天线架高，因为两个平台的 z 都恒为 0
+#   （水面件的位形约束，不是"高度没地方给"）。陆地平台的 §9-41 问题在这里
+#   不存在——那一条说的是 z 恒 0 的地面/空中平台被判成"埋在地下"。
+#
+# 一圈 2 s ⇒ 角速率 180°/s，而 1 s 一拍就转过 180° ≥ 120° ⇒ **每拍都把整片
+# 视场扫过一遍**，于是每个目标每拍恰好被照射一次（M/N 的分母是"被照射次数"，
+# 所以这里是每秒 1 次，不是"每 2 秒一次"）。
+component_type HEX_SEARCH_RADAR
+    detect_range   8 km
+    max_range      20 km
+    scan_interval  2 s
+    scan_center    270 deg
+    fov            120 deg
+    antenna_height 10 m
+    required_pd    0.5
+    hits_to_establish 3
+    establish_window  5
+    hits_to_maintain  2
+    maintain_window   5
+end_component_type
+
+# ---- 平台类型 ----
+# ★ `component track TRACK_MANAGER` 是 v0.13.29 新增的**平台级航迹汇聚件**
+#   （§5.13）。这里一个参数都不写，就是它的默认档：`drop_after_inactive 0`
+#   （不清理）与 `share_interval 0`（不转发）。于是：
+#
+#     **它装上之后，本想的全部输出逐字不变**
+#     （120 拍 / 60.00 圈 / 方位 270.0° / 距离 7.97 km / 每拍照到一次 /
+#       quality 0.51 / 被地平线挡掉的那艘一条航迹都没有）。
+#
+#   这不是"装了没用"，而是**默认档的定义**：新行为的唯一正当判据是旧行为
+#   可逐字复现。要它做事得显式开：`drop_after_inactive 30 s` 撤超时航迹、
+#   `share_interval 5 s` + `share_recipients [谁]` 把航迹共享出去（后者还要
+#   通信件把报文从在途队列搬到收件箱，而通信件还没写，§9-44）。
+platform_type PATROL_BOAT
+    side red
+    component mover WATER_MOVER
+        max_speed 12 m/s
+    end_component
+    component sensor HEX_SEARCH_RADAR
+    end_component
+    component track TRACK_MANAGER
+    end_component
+end_platform_type
+
+platform_type TARGET_BOAT
+    side blue
+    component mover WATER_MOVER
+        max_speed 8 m/s
+    end_component
+end_platform_type
+
+# ---- 战区 ----
+zone EAST_SECTOR
+    anchor     39.9042 116.4074
+    radius     60 km
+    resolution 200 m
+    layers     1
+end_zone
+
+# ---- 实例 ----
+# 红艇在 `Axial(-24, 0)`（锚点以西 8313.8 m）。沿正西**每一格的高程都 ≤ 0**，
+# 所以在 `terrain_floor = 0.0` 下整条视线脚下都是海平面 0 ⇒ 这是一片**理想
+# 平坦海面**，通视条件精确等于 `D ≤ 13034.3 m`。
+platform RED_1 PATROL_BOAT
+    position latlng 39.9042 116.3100
+    heading  270 deg
+end_platform
+
+# 目标 A：正西 7967.4 m（23 格）。< 地平线 ⇒ 第 4 步放行；距标称探测距离
+# 8000 m 差 32.6 m。**默认非起伏**口径下 Pd = 0.5167166520（旧 Swerling 1
+# 口径是 0.5053603911）——"标定点是一个点"，这个偏差本身就是要看的数。
+platform BLUE_1 TARGET_BOAT
+    position latlng 39.9040 116.2165
+    heading  90 deg
+end_platform
+
+# 目标 B：正西 15242.0 m（44 格）。在 20 km 搜索界内、在 120° 扇区内，
+# 但**超出 13034.3 m 的无线电地平线** ⇒ 只被第 4 步挡掉。
+# 余隙只有 −0.25 m 而不是负几千米，这本身就是物理：地平线附近是**擦地掠过**，
+# 曲率下沉量在 15 km 处才 13.7 m，余隙是从 0 翻负的，不是从高空摔下来的。
+platform BLUE_2 TARGET_BOAT
+    position latlng 39.9039 116.1312
+    heading  90 deg
+end_platform

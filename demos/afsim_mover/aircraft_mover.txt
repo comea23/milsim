@@ -1,0 +1,215 @@
+# AFSIM aircraft_mover demo 的 milsim 复现（对照见同目录 README.md）
+#
+# 原脚本：demos/mover_demo/aircraft_mover_demo.txt（AFSIM 2.9.0-v1.0 汉化版）。
+# **那份原稿在 AFSIM 2.9.0 上跑不起来**（顶层 simulation 块、型号里的 name、
+# `platform <名>` + 块内 `platform_type <型号>` 的两步写法、旋翼机的 mode 块，
+# 四种它认不出的语法）。所以 AFSIM 侧的参照不是原稿，而是**按原稿的航线与
+# 参数重写的合法脚本** `afsim_aircraft_mover.txt`（同目录，页首列了四条原因）。
+# 航线坐标、高度、每段速度、航向、初始高度全部逐字照抄，一个数字没改。
+#
+# 复现的是原稿的**七个科目**（旋翼机那一个不复现——我们没有旋翼机件，见 README）：
+#
+#   1 AIR_MOVER_MAX_SPEED   直线加速到最大速度
+#   2 AIR_MOVER_MAX_CLIMB   从 2000 ft 爬到 45000 ft
+#   3 AIR_MOVER_MAX_TURN    20000 ft 上的方形四边，每边约 9 km
+#   4 AIR_MOVER_MAX_G       15000 ft 上的窄四边形
+#   5 AIR_MOVER_DIVE        40000 ft 俯冲到 1000 ft 再拉起
+#   6 KINEMATIC_SMOOTH      10000→30000→15000→5000 ft 的连续垂向过渡
+#   7 KINEMATIC_DIVE        35000 ft 俯冲到 2000 ft 再拉回 35000 ft
+#
+# 前五个用 WSF_AIR_MOVER（原稿 DEMO_AIR_MOVER_WSF_AIR_MOVER 的参数），
+# 后两个用 WSF_KINEMATIC_MOVER（原稿 DEMO_AIR_MOVER_WSF_KINEMATIC 的参数）。
+# 我们是**同一个 AIR_MOVER 件**，差别落在参数上——两边的映射表见 README。
+#
+# **速率是这份复现最大的一处简化，务必先看**：原稿每个航路点各带一个速度
+# （200 / 400 / 500 / 600 / 700 / 900 mph），而我们的空中件只有一个
+# `max_speed`，没有 GoToSpeed 也没有"航路点速度"。这里取的是**第二个航路点
+# 上写的那个速度**（即"进入正式航段时的速度"），一个科目一个常数：
+#
+#   MAX_SPEED 900 mph   MAX_CLIMB 500 mph   MAX_TURN 600 mph
+#   MAX_G     700 mph   DIVE      400 mph
+#   KINEMATIC_SMOOTH 500 mph   KINEMATIC_DIVE 400 mph
+#
+# 后果是可以预期的：原稿第一段（200 mph 起步、900 mph 冲刺）在复现里变成
+# 全程 900 mph，所以 MAX_SPEED 那一格的**水平航迹**会明显提前；转弯那几格
+# 每段速度本来就是常数，**不受这条影响**。这条属"能力缺口"不是差别。
+
+simulation
+    name     "AFSIM aircraft_mover 复现"
+    max_step 0.1 s
+    seed     20260920
+end_simulation
+
+zone DEMO_AREA
+    anchor     34.0 -83.17
+    radius     60 km
+    resolution 1 km
+    layers     1
+end_zone
+
+component_type AIR_MOVER
+end_component_type
+
+# ---- 气动件（原稿 DEMO_AIR_MOVER_WSF_AIR_MOVER 的参数）------------------
+#
+# 逐条对应：
+#   turn_rate_limit 360 deg/min = 6.0 deg/s   → turn_rate
+#   maximum_radial_acceleration 4 g = 39.2     → radial_accel
+#   maximum_linear_acceleration 5 g = 49.0     → linear_accel
+#   roll_rate_limit 20 deg/sec                 → angular_accel（量级代理）
+#   maximum_climb_rate 3000 ft/min = 15.24 m/s → climb_rate / descent_rate
+#   maximum_flight_path_angle 15 deg           → **无对应参数**（见 README）
+#
+# 垂向的 `vertical_accel` 给到 1000 m/s²：AFSIM 的 AIR_MOVER **不在垂向算
+# 加速度**（原 demo 的说明原句），速率一改就是满值。我们把它写成"大到不成为
+# 瓶颈"，而不是删掉这条参数——参数表是契约，缺项要在文档里说，不能靠不写。
+component_type AIR_M : AIR_MOVER
+    max_speed       223.5 m/s
+    turn_rate         6 deg/s
+    radial_accel     39.2 m/s2
+    linear_accel     49.0 m/s2
+    angular_accel    20 deg/s2
+    vertical_accel 1000 m/s2
+    climb_rate       15.24 m/s
+    descent_rate     15.24 m/s
+    cruise_altitude  9000 m
+    period 0.1 s
+end_component_type
+
+# MAX_SPEED：900 mph = 402.3 m/s
+component_type AIR_M_SPEED : AIR_M
+    max_speed 402.3 m/s
+end_component_type
+
+# MAX_CLIMB：500 mph = 223.5 m/s
+component_type AIR_M_CLIMB : AIR_M
+    max_speed 223.5 m/s
+end_component_type
+
+# MAX_TURN：600 mph = 268.2 m/s
+component_type AIR_M_TURN : AIR_M
+    max_speed 268.2 m/s
+end_component_type
+
+# MAX_G：700 mph = 312.9 m/s
+component_type AIR_M_G : AIR_M
+    max_speed 312.9 m/s
+end_component_type
+
+# DIVE：400 mph = 178.8 m/s
+component_type AIR_M_DIVE : AIR_M
+    max_speed 178.8 m/s
+end_component_type
+
+# ---- 运动学件（原稿 DEMO_AIR_MOVER_WSF_KINEMATIC 的参数）----------------
+#
+#   maximum_linear_acceleration 3 g = 29.4     → linear_accel
+#   maximum_radial_acceleration 6 g = 58.8     → radial_accel
+#   maximum_body_turn_rate 45 deg/sec          → turn_rate
+#   maximum_body_roll_rate 180 deg/sec         → angular_accel（量级代理）
+#
+# 垂向这里 **`vertical_accel` 取 29.4**（= 3 g，就是它的 linear_accel）：
+# 运动学件的加速度是**在三维里算**的（原 demo 说明的第二句），所以垂向那一层
+# 接的是同一份线性加速度，而不是给成"不成为瓶颈"。这一条正是 flyer1~3 与
+# flyer4 的区别，在 kinematic_mover.txt 里也有。
+component_type KIN_M : AIR_MOVER
+    max_speed      223.5 m/s
+    turn_rate      45 deg/s
+    radial_accel   58.8 m/s2
+    linear_accel   29.4 m/s2
+    angular_accel 180 deg/s2
+    vertical_accel 29.4 m/s2
+    climb_rate    200 m/s
+    descent_rate  200 m/s
+    cruise_altitude 10000 m
+    period 0.1 s
+end_component_type
+
+component_type KIN_M_SMOOTH : KIN_M
+    max_speed 223.5 m/s
+end_component_type
+
+component_type KIN_M_DIVE : KIN_M
+    max_speed 178.8 m/s
+end_component_type
+
+# ---- 平台类型 -----------------------------------------------------------
+
+platform_type P_AIR_M_SPEED
+    side blue
+    component mover AIR_M_SPEED
+    end_component
+end_platform_type
+
+platform_type P_AIR_M_CLIMB
+    side blue
+    component mover AIR_M_CLIMB
+    end_component
+end_platform_type
+
+platform_type P_AIR_M_TURN
+    side blue
+    component mover AIR_M_TURN
+    end_component
+end_platform_type
+
+platform_type P_AIR_M_G
+    side blue
+    component mover AIR_M_G
+    end_component
+end_platform_type
+
+platform_type P_AIR_M_DIVE
+    side blue
+    component mover AIR_M_DIVE
+    end_component
+end_platform_type
+
+platform_type P_KIN_SMOOTH
+    side blue
+    component mover KIN_M_SMOOTH
+    end_component
+end_platform_type
+
+platform_type P_KIN_DIVE
+    side blue
+    component mover KIN_M_DIVE
+    end_component
+end_platform_type
+
+# ---- 实例：起点/航向/初始高度照抄原稿 ------------------------------------
+
+platform AIR_MOVER_MAX_SPEED P_AIR_M_SPEED
+    position latlng 33.9124 -83.3379
+    heading  90 deg
+end_platform
+
+platform AIR_MOVER_MAX_CLIMB P_AIR_M_CLIMB
+    position latlng 33.9124 -83.3379
+    heading  270 deg
+end_platform
+
+platform AIR_MOVER_MAX_TURN P_AIR_M_TURN
+    position latlng 33.9124 -83.3379
+    heading  0 deg
+end_platform
+
+platform AIR_MOVER_MAX_G P_AIR_M_G
+    position latlng 33.9124 -83.3379
+    heading  180 deg
+end_platform
+
+platform AIR_MOVER_DIVE P_AIR_M_DIVE
+    position latlng 33.9124 -83.3379
+    heading  90 deg
+end_platform
+
+platform KINEMATIC_SMOOTH P_KIN_SMOOTH
+    position latlng 34.0000 -83.0000
+    heading  270 deg
+end_platform
+
+platform KINEMATIC_DIVE P_KIN_DIVE
+    position latlng 34.0000 -83.0000
+    heading  90 deg
+end_platform

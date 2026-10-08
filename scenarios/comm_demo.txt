@@ -1,0 +1,186 @@
+# 通信演示：一个四方通信网 + 一条只走链的受限期 + 第二步的干扰压制
+#
+# ★ 本想的全部意义：把 §5.15 的四条口径在**一份能跑的想定**上同时摆出来，
+#   而不是只活在单元测试里。
+#
+#   ① 组网是**显式**的（`network` 块），不是隐式假设"同方就通"；
+#   ② 入网默认 **mesh 全连通**（谁也拦不住谁），要收窄才写 `link`；
+#   ③ 一个实体**只能属于一个网**，跨网通信 = 网关，本版报错；
+#   ④ 报文**按拍**投递：通才投，不通留队等下一拍（"到点 ≠ 通"）；
+#   ⑤（v0.13.38 第二步）**干扰压制**：收信机算 `S/(N+J)`，不过门限 ⇒ 这一拍
+#     从拓扑上摘掉 ⇒ 绕路或真断。施扰端**复用** `RF_JAMMER`。
+#
+# ★ 组件挂法：`component comm RF_COMM`（通信件）、`component jammer RF_JAMMER`
+#   （干扰机）。`SLOT_HINT = "comm"` / `"jammer"`，一个平台挂一个。
+#   ★ 槽名尾部的裸数字 = **天线条数**（§5.14.11 ③）：写 `jammer` 就是 1 条，
+#     **不要写 `jammer0`**——那会解析出 0 条天线（§9-63）。
+
+simulation
+    name     "通信演示"
+    max_step 2 s
+    seed     20260929
+end_simulation
+
+# ---- 组件类型 ----
+# ★ 这里**不覆盖任何参数**，是故意的：`RF_COMM` 的默认档就是"2 s 按拍、
+#   不声明网名、不判干扰"（`power 0` / `noise_power 0` ⇒ 缺数据 ⇒ 不压制）。
+#   要演压制就在平台层写全收信机那几个数（见下面的 `COMM_NODE_JAMMED`）。
+component_type RF_COMM
+end_component_type
+
+# ---- 平台类型 ----
+# ★ 通信件不依赖机动件：平台都是"站桩"，不挂 mover。
+#   这不是偷懒——本想想演的是**拓扑**，第一步的 `path_exists` **完全不看位置**
+#   （全连通是"入网即可达"，显式链是"按边可达"）。位置在这里的用处是：
+#   第二步接上干扰之后，`JamService._eligible` 要看**斜距**，所以位置真的进了账。
+platform_type RELAY_NODE
+    side blue
+    component comm RF_COMM
+    end_component
+end_platform_type
+
+# 受限期的那三个节点：挂的是同一个组件，差别全在 `network` 块怎么连。
+platform_type CHAIN_NODE
+    side blue
+    component comm RF_COMM
+    end_component
+end_platform_type
+
+# ---- 第二步：会被压制的通信节点 ----
+# ★ 收信机那几个数就是"我这部设备多抗干扰"（§5.15 裁定③"一张表"）：
+#   `power`（额定发射功率）与 `noise_power` 一起给出**名义 S/N**；
+#   `frequency` / `bandwidth` 决定**干扰进不进得来**（`F_BW`）；
+#   `required_snr_db` 是**门限**——`S/(N+J)` 低于它 ⇒ 这一拍掉线。
+#   ★ **门限越高越容易掉线**（要求高 = 稍微被压就不达标），这个方向的直觉容易反。
+#   ★ `required_snr_db` 取 **45 dB**，不是随手写的：本想的 JN1（离干扰机
+#     866 m）实测 `S/(N+J) = 39.24 dB`、JN2（离 20.25 km）实测 `66.62 dB`。
+#     门限卡在两者之间 ⇒ 同一份想定里"压得住"与"够不着"各演一个。
+#     取 30 dB 的话两个都通（压制根本不发生）——那是**没有物理直觉的写法**。
+#   ★ 注意 `S/(N+J)` 与 `noise_power` **无关**（J 远大于 N 时 S/(N+J) → S/J，
+#     N 被消掉）：拿噪声当"抗干扰能力"的旋钮是无效的。真正的旋钮是
+#     `power × antenna_gain_db`（决定 S/J）与 `required_snr_db`（门限）。
+platform_type COMM_NODE_JAMMED
+    side blue
+    component comm RF_COMM
+        power          10 W
+        antenna_gain_db 6
+        frequency      4 GHz
+        bandwidth      2 MHz
+        noise_power    1e-11 W
+        required_snr_db 45
+    end_component
+end_platform_type
+
+# ---- 第二步：干扰机（复用 RF_JAMMER，不是通信专用语法）----
+# ★ 一台干扰机**什么也不做**：它只在装配期登记"我有多大的功率、多宽的谱、
+#   朝哪打"，求值发生在**受害接收机**身上（§5.14）。所以它没有 `period`。
+# ★ `ignore_same_side` 默认 true（同阵营不打）⇒ 本想给它 `side red`，
+#   被它压的通信节点是 `side blue`。
+platform_type STANDOFF_JAMMER
+    side red
+    component jammer RF_JAMMER
+        peak_power      100 kW
+        frequency       4 GHz
+        antenna_gain_db 30
+    end_component
+end_platform_type
+
+# ---- 战区 ----
+# ★ 战区是**必须**的（§9-55）：没有 `zone` 的话所有 `latlng` 会静默变成
+#   (0,0,0)，平台全叠在原点。第二步起这尤其致命——`JamService._eligible`
+#   有一道"两台机不可以同处一点"的筛，全叠原点会把整台名册跳过去，
+#   而症状是"干扰机挂着、一点用没有"。
+zone COMM_SECTOR
+    anchor     39.9042 116.4074
+    radius     40 km
+    resolution 500 m
+    layers     1
+end_zone
+
+# ---- 通信网 ----
+# ① MESH_NET：四个节点**全连通**（`links` 为空 ⇒ 完备图，§5.15.5）。
+#    任意两个成员之间 `path_exists` 恒为 True；`route` 给一跳直达。
+network MESH_NET
+    member N1 N2 N3 N4
+end_network
+
+# ② RELAY_CHAIN：三个节点**只走链**（显式有向边，§5.15.5）。
+#    ★ `link` 是**单向**的：`C1 to C2` 不代表 `C2 to C1` 通。
+#      本想只写正向，就是为了让"单向"这件事在 `route` 上看得见。
+#    ★ 第二步：给 `J1`（干扰机）挂在这一网的链尾——它压的是 `C3`，
+#      于是 `C1→C3` 这一跳被摘掉。本想**刻意不给旁路**，
+#      让"真断"与 MESH_NET 的"绕路"在同一份想定里对照（§5.15.6）。
+network RELAY_CHAIN
+    member C1 C2 C3
+    link C1 to C2
+    link C2 to C3
+end_network
+
+# ③ 受扰网：两个通信节点 + 一台干扰机（第二步的核心）。
+#    ★ 干扰机**不写进 `member`**：它没有 `RF_COMM`，不进任何网，
+#      所以不参与寻路（它只是"战场上的一个辐射源"）。写进去反而会在
+#      装配期因为"挂了 RF_COMM 才需入网"的校验上出错。
+network JAMMED_NET
+    member JN1 JN2
+end_network
+
+# ---- 实例 ----
+# MESH_NET 的四个节点：站成一排，只为让战区内有四个可分辨的位置。
+platform N1 RELAY_NODE
+    position latlng 39.9042 116.4074
+    heading  90 deg
+end_platform
+
+platform N2 RELAY_NODE
+    position latlng 39.9142 116.4174
+    heading  90 deg
+end_platform
+
+platform N3 RELAY_NODE
+    position latlng 39.9242 116.4274
+    heading  90 deg
+end_platform
+
+platform N4 RELAY_NODE
+    position latlng 39.9342 116.4374
+    heading  90 deg
+end_platform
+
+# RELAY_CHAIN 的三个节点。
+# ★ 它们**不写 `network` 参数**（写了也行，只要名字与 `member` 块一致；
+#   写别的名字会在**装配期**报错，见 §5.15.4）。空串 = 没声明，放行。
+platform C1 CHAIN_NODE
+    position latlng 39.8942 116.3974
+    heading  90 deg
+end_platform
+
+platform C2 CHAIN_NODE
+    position latlng 39.8842 116.3874
+    heading  90 deg
+end_platform
+
+platform C3 CHAIN_NODE
+    position latlng 39.8742 116.3774
+    heading  90 deg
+end_platform
+
+# ---- 第三步：干扰压制组 ----
+# ★ 干扰机 `JAM1` 与 `JN1` 相距约 1 km（**不能同点**，见 §5.15.9 那道筛）。
+#   实测几何：`JN1` 与干扰机约 900 m ⇒ `S/(N+J)` 掉到门限以下 ⇒ 被摘掉；
+#   `JN2` 在 20 km 外 ⇒ 进不了带（`J ∝ 1/R²`）⇒ 照常通信。
+#   ⇒ 这条想定同时演出了"压得住"与"够不着"两件事。
+platform JN1 COMM_NODE_JAMMED
+    position latlng 39.9042 116.4074
+    heading  90 deg
+end_platform
+
+platform JN2 COMM_NODE_JAMMED
+    position latlng 40.0842 116.4074
+    heading  90 deg
+end_platform
+
+platform JAM1 STANDOFF_JAMMER
+    position latlng 39.9042 116.4174
+    heading  90 deg
+end_platform
+

@@ -1,0 +1,427 @@
+# ****************************************************************************
+# milsim 对照用想定：探测 → 通信传航迹 → 引导干扰
+#
+# 这份想定是"多组件组合"的 AFSIM 侧基线。两个环节各有一份 AFSIM 原生
+# demo 作依据，没有任何一份原生 demo 同时具备这两个环节，所以这里是拼的：
+#
+#   环节①（探测 → 通信传航迹）
+#       骨架抄 demos/electronic_warfare/comm_jamming.txt：
+#       WSF_RADAR_SENSOR → WSF_TRACK_PROCESSOR (report_to subordinates via radio)
+#                        → WSF_RADIO_TRANSCEIVER
+#       ★ 与 comm_jamming 的唯一区别：那边用 WSF_GEOMETRIC_SENSOR（几何传感器，
+#         不做真实探测），这里换成 WSF_RADAR_SENSOR（真探测，写法抄
+#         demos/electronic_warfare/esm_detect_jammer.txt 的 EW_RADAR）。
+#         理由：要对照的中间量里有"探测发生了吗"，几何传感器不产生
+#         SENSOR_DETECTION_ATTEMPT。
+#
+#   环节②（用收到的航迹引导干扰机置向）
+#       脚本抄 demos/electronic_warfare/agile_jamming.txt 的 JAMMER_TASK_MGR：
+#       TRACK.SignalFrequency() + PLATFORM.WithinFieldOfView(TRACK, jammer)
+#       + StartJamming(TRACK, ...)。
+#       ★ 与 agile_jamming 的唯一区别：那边是 ESM 直接探测（WSF_ESM_SENSOR）
+#         拿到 TRACK，这里是 track-proc 收到 WSF_TRACK_MESSAGE 后拿到 TRACK。
+#         这正是"经通信传来的航迹"与"自己探到的辐射源"的区别。
+#
+#   ★ 必须知道的三条语义差异（对拍时按"只比值不比机制"处理，见 README）：
+#       1. AFSIM 的"引导"入口是 TRACK 对象，天线指向由 AFSIM 内部的
+#          WithinFieldOfView 判；milsim 的 aim_at 读本机航迹表算方位角。
+#          语义等价（都是"看见才打"），机制不同。
+#       2. AFSIM 的干扰机是 StartJamming(目标, ...) 按目标对象打，不"读航迹
+#          表置向"。
+#       3. AFSIM 的 jamming_perception_threshold 是"接收机感知到干扰"，
+#          不是"链路断开"。链路真断的可见后果是 MESSAGE_DISCARDED。
+#
+#   反向用例（中途切断通信链）AFSIM 侧没有等价开关，只 milsim 侧做；
+#   但这份想定天然带着一条同方向的因果：干扰起来之后 MESSAGE_DISCARDED
+#   开始出现（实测 comm_jamming 里 600 收到 vs 3720 丢弃）。
+# ****************************************************************************
+define_path_variable  CASE comm_track_jam
+log_file output/$(CASE).log
+
+//-----------------------------------------------------------------
+// 事件管道
+//-----------------------------------------------------------------
+event_pipe
+   file output/$(CASE).aer
+   use_preset full
+end_event_pipe
+
+script_interface
+   debug
+end_script_interface
+
+//-----------------------------------------------------------------
+// 通信设备（逐字抄 comm_jamming.txt 的 RADIO）
+//-----------------------------------------------------------------
+antenna_pattern RADIO_ANTENNA_PATTERN
+   uniform_pattern
+   peak_gain 10 dB
+end_uniform_pattern
+end_antenna_pattern
+
+comm RADIO WSF_RADIO_TRANSCEIVER
+   maximum_range 100 nm
+   transmit_mode continuous
+   transmitter
+      power 100 w
+      antenna_pattern RADIO_ANTENNA_PATTERN
+      frequency 2.4 GHz
+      bandwidth 5.0 MHz
+   end_transmitter
+   receiver
+      antenna_pattern RADIO_ANTENNA_PATTERN
+      frequency 2.4 GHz
+      bandwidth 1 MHz
+   end_receiver
+   jamming_perception_threshold 3.0 db
+   jamming_perception_timeout   60 sec
+end_comm
+
+//-----------------------------------------------------------------
+// 雷达（抄 esm_detect_jammer.txt 的 EW_RADAR，缩到本场景需要的距离）
+//-----------------------------------------------------------------
+antenna_pattern EW_RADAR_ANTENNA
+   rectangular_pattern
+      peak_gain           35 dB
+      minimum_gain       -20 dB
+      azimuth_beamwidth   5 deg
+      elevation_beamwidth 45 deg
+   end_rectangular_pattern
+end_antenna_pattern
+
+sensor EW_RADAR WSF_RADAR_SENSOR
+   frame_time                1 sec
+   scan_mode                 azimuth
+   azimuth_scan_limits       -180 deg 180 deg
+   // ★ 与 esm_detect_jammer 的差别：那边雷达在地面、目标是飞机（仰角），
+   // 视场 -2.5..42.5 够用；这里侦察机在 30000 ft 俯视地面目标，俯角约 -9°，
+   // 必须把下限放宽，否则 480 次探测全部 Detected: false（实测过）。
+   elevation_field_of_view  -60 deg 60 deg
+   minimum_range             0 nm
+   maximum_range             400 km
+   one_m2_detect_range       225 km
+   transmitter
+      power           750 kw
+      frequency       900 mhz
+      bandwidth       0.1 mhz
+      pulse_width                  10  usec
+      pulse_repetition_interval    750 usec
+      antenna_pattern EW_RADAR_ANTENNA
+      antenna_tilt     10 deg
+   end_transmitter
+   receiver
+      antenna_pattern EW_RADAR_ANTENNA
+      antenna_tilt     10 deg
+      frequency       900 mhz
+      bandwidth         1 mhz
+   end_receiver
+   // ★ 检测判决三件套：缺了它们，SENSOR_DETECTION_ATTEMPT 只输出到 RcvrBeam
+   //   那行就结束，不会出现 S/I / Threshold / S/N / Pd / Detected —— 而"干扰
+   //   是否把这次探测压掉"只能从 Detected 看，是"④压制生效"唯一的数值落点。
+   //   （实测：不写这三行时 .evt 里连 "Detected" 这个词都不存在。）
+   //   取值抄 demos/electronic_warfare/barrage_jamming.txt（同一套 Swerling-1）。
+   swerling_case                 1
+   probability_of_false_alarm    1.0e-6
+   required_pd                   0.5
+   number_of_pulses_integrated   16
+   hits_to_establish_track   3 5
+   hits_to_maintain_track    1 4
+   reports_location
+   reports_velocity
+   reports_signal_to_noise
+   reports_range
+   reports_bearing
+   reports_elevation
+end_sensor
+
+//-----------------------------------------------------------------
+// 干扰机（抄 agile_jamming.txt 的 JAMMER，频率改到 2.4 GHz 压通信）
+//-----------------------------------------------------------------
+antenna_pattern JAMMER_ANTENNA
+   circular_pattern
+      peak_gain             10 dB
+      beamwidth             60 deg
+   end_circular_pattern
+end_antenna_pattern
+
+electronic_warfare JAMMER_EA WSF_ELECTRONIC_ATTACK
+   technique noise_jamming WSF_EA_TECHNIQUE
+      mitigation_class_name noise_jamming
+      effect power_effect WSF_POWER_EFFECT
+      end_effect
+   end_technique
+end_electronic_warfare
+
+weapon JAMMER WSF_RF_JAMMER
+   transmitter
+      power           1000 w
+      frequency_band  100 mhz 10000 mhz
+      antenna_pattern JAMMER_ANTENNA
+      electronic_attack JAMMER_EA
+         technique noise_jamming
+         end_technique
+      end_electronic_attack
+   end_transmitter
+end_weapon
+//: 干扰机天线：抄 agile_jamming 的 circular_pattern，但主瓣加宽到 60°。
+//: ★ 差异理由：agile_jamming 用 10° 主瓣，但那边航迹由 ESM 持续刷新、且
+//: 干扰机与目标几何稳定；本场景干扰机在飞、航迹每 10 s 才刷新一次，10° 主瓣
+//: 会让"主瓣盖不盖得住"频繁翻转（实测 JAMMING_ATTEMPT 在起停之间抖）。
+//: 60° 是为了让"引导置向"这条能稳定观察，不是物理上更对。
+
+//-----------------------------------------------------------------
+// ★ 环节②的核心：收到 WSF_TRACK_MESSAGE 就用它引导干扰
+//
+// 与 agile_jamming.txt 的 AddSpot() 有两处**必须**的改写，理由如下：
+//   1. agile_jamming 那边 TRACK 来自 WSF_ESM_SENSOR（报 reports_frequency），
+//      所以它能用 TRACK.SignalFrequency(signalIndex) 拿到被干扰的频点。
+//      这里 TRACK 来自 WSF_TRACK_MESSAGE（通信转发），**不带"信号"字段** ——
+//      实测 TRACK.SignalCount() == 0，照抄的 AddSpot() 一次都进不去
+//      （started jamming: 0）。⇒ 改成"位置来自航迹、频点由干扰机自己定"：
+//      这才是"用航迹引导置向"的正确写法（航迹给的是**目标在哪**，
+//      不是**目标辐射什么频率**）。
+//   2. 频点取 900 MHz（红雷达频点）。第一次写 2.4 GHz 实测一发
+//      JAMMING_ATTEMPT 都不产生 —— WSF_RF_JAMMER 只在"受害接收机落在干扰
+//      带内"时才辐射，频点不对就是静默的零辐射。
+//-----------------------------------------------------------------
+processor JAMMER_TASK_MGR WSF_TASK_PROCESSOR
+
+   script bool AddSpot()
+      // 本机干扰机，按名字取
+      if (PLATFORM.WeaponCount() <= 0)
+      {
+         return false;
+      }
+      WsfWeapon jammer = PLATFORM.WeaponEntry(0);
+      // ★ 主瓣盖得住目标才打（等价于 milsim 的 aim_at 第四道筛）
+      if (!PLATFORM.WithinFieldOfView(TRACK, jammer.Name()))
+      {
+         return false;
+      }
+      double freq = 900000000.0;
+      if (StartJamming(TRACK, "Jam_surv", jammer, freq, 2.e6, "noise_jamming"))
+      {
+         writeln("T=", TIME_NOW, " ", PLATFORM.Name(), ":", jammer.Name(),
+                 " started jamming ", TRACK.TargetName(), " freq=", freq);
+         return true;
+      }
+      return false;
+   end_script
+
+   script bool HadToStopJamming()
+      bool stoppedJamming = false;
+      bool cancelledTasks = true;
+      WsfTaskList taskList = AssignedTaskList(TRACK.TrackId(),"");
+      foreach(WsfTask task in taskList)
+      {
+         if (task.ResourceIsJammer())
+         {
+            // ★ 与 agile_jamming 的差别：那边靠 task.ResourceFrequency() ==
+            // TRACK.SignalFrequency(...) 比频点；这里航迹不带信号，改判
+            // "视场还盖不盖得住"。盖得住就继续打，盖不住才停。
+            bool needToStopJamming = true;
+            if (PLATFORM.WithinFieldOfView(TRACK, task.ResourceName()))
+            {
+               needToStopJamming = false;
+            }
+            if (needToStopJamming)
+            {
+               cancelledTasks = (cancelledTasks && CancelTask(task.TrackId(), task.TaskType()));
+               stoppedJamming = true;
+            }
+         }
+      }
+      return (stoppedJamming && cancelledTasks);
+   end_script
+
+   evaluation_interval DETECTED 5.0 sec
+   state DETECTED
+      next_state CAN_JAM
+         return (TRACK.TimeSinceUpdated() < 10.0);
+      end_next_state
+   end_state
+
+   evaluation_interval CAN_JAM 5.0 sec
+   state CAN_JAM
+      next_state DETECTED
+         return (TRACK.TimeSinceUpdated() >= 10.0);
+      end_next_state
+      next_state IS_JAMMING
+         return AddSpot();
+      end_next_state
+   end_state
+
+   evaluation_interval IS_JAMMING 5.0 sec
+   state IS_JAMMING
+      next_state CAN_JAM
+         return HadToStopJamming();
+      end_next_state
+   end_state
+
+end_processor
+
+//-----------------------------------------------------------------
+// 平台类型
+//-----------------------------------------------------------------
+
+//: 侦察机：雷达 + 航迹处理（经 radio 上报）+ radio
+platform_type SCOUT_TYPE WSF_PLATFORM
+   icon AWACS
+   side blue
+   commander SELF
+   mover WSF_AIR_MOVER end_mover
+   radar_signature WIDE_BODY_SIGNATURE
+
+   sensor scout_radar EW_RADAR
+      on
+      ignore_same_side
+      internal_link track-proc
+   end_sensor
+
+   // ★ 环节①：航迹经 radio 发给下属
+   processor track-proc WSF_TRACK_PROCESSOR
+      report_to subordinates via radio
+   end_processor
+
+   comm radio RADIO
+   end_comm
+end_platform_type
+
+//: 干扰机：收航迹（radio 进 track-proc）+ 照航迹打
+platform_type JAMMER_TYPE WSF_PLATFORM
+   icon EA-6B
+   side blue
+   commander scout
+   mover WSF_AIR_MOVER end_mover
+   radar_signature WIDE_BODY_SIGNATURE
+
+   weapon jammer JAMMER
+   end_weapon
+
+   // 航迹进本机航迹表：radio 与 track-proc 互链
+   comm radio RADIO
+      internal_link track-proc
+   end_comm
+
+   // ★ 环节②用收到的航迹触发：on_message 收 WSF_TRACK_MESSAGE。
+   // 写法逐字照抄 comm_jamming.txt 的 track-proc（它那边只 writeln，这里多一层
+   // 把收到航迹记下来——真正的"照航迹打"在下面的 task_mgr 里）。
+   processor track-proc WSF_TRACK_PROCESSOR
+      on_message
+         type WSF_TRACK_MESSAGE
+            script
+               WsfTrackMessage trackMsg = (WsfTrackMessage)MESSAGE;
+               writeln("T=", TIME_NOW, " ", PLATFORM.Name(),
+                       " received track: ", trackMsg.Track().TrackId().ToString());
+            end_script
+         end_on_message
+   end_processor
+
+   // ★ 环节②：拿收到的航迹引导干扰
+   processor task_mgr JAMMER_TASK_MGR
+   end_processor
+end_platform_type
+
+//: 红方目标（被探测；不动）
+platform_type RED_TGT_TYPE WSF_PLATFORM
+   icon MiG-25
+   side red
+   mover WSF_GROUND_MOVER end_mover
+   radar_signature FIGHTER_RADAR_SIGNATURE
+end_platform_type
+
+//: 红方受害雷达（被干扰；也探测）
+platform_type RED_RADAR_TYPE WSF_PLATFORM
+   icon Ground_Radar
+   side red
+   mover WSF_GROUND_MOVER end_mover
+
+   sensor red_radar EW_RADAR
+      on
+      ignore_same_side
+      processor track_manager
+   end_sensor
+
+   processor track_manager WSF_TRACK_PROCESSOR
+   end_processor
+end_platform_type
+
+//-----------------------------------------------------------------
+// 签名
+//-----------------------------------------------------------------
+radar_signature FIGHTER_RADAR_SIGNATURE
+   constant 10 m^2
+end_radar_signature
+
+radar_signature WIDE_BODY_SIGNATURE
+   constant 100 m^2
+end_radar_signature
+
+//-----------------------------------------------------------------
+// 平台实例
+//-----------------------------------------------------------------
+
+//: 侦察机（蓝）：从南往北飞过战场，一直在雷达量程内
+platform scout SCOUT_TYPE
+   route
+      position 35:30:00n 116:00:00w altitude 30000 ft speed 400 kts
+      position 38:30:00n 116:00:00w altitude 30000 ft speed 400 kts
+   end_route
+end_platform
+
+//: 干扰机（蓝）：侦察机的下属，跟在后面
+platform jammer JAMMER_TYPE
+   route
+      position 35:10:00n 116:10:00w altitude 30000 ft speed 400 kts
+      position 38:10:00n 116:10:00w altitude 30000 ft speed 400 kts
+   end_route
+   weapon jammer
+      off
+   end_weapon
+end_platform
+
+//: 红方目标：在侦察机航路东侧约 40 km
+platform red-target RED_TGT_TYPE
+   side red
+   route
+      position 37:00:00n 115:30:00w altitude 0 ft agl heading 0 deg
+   end_route
+end_platform
+
+//: 红方受害雷达：在红方目标南侧，与干扰机相距约 60 km
+platform red-radar RED_RADAR_TYPE
+   side red
+   route
+      position 36:20:00n 116:20:00w altitude 0 ft agl heading 0 deg
+   end_route
+   sensor red_radar
+   end_sensor
+end_platform
+
+//-----------------------------------------------------------------
+// 事件输出：对拍要用的四类中间量全开
+//-----------------------------------------------------------------
+event_output
+   enable COMM_TURNED_OFF
+   enable COMM_TURNED_ON
+   enable JAMMING_ATTEMPT
+   enable JAMMING_REQUEST_CANCELED
+   enable JAMMING_REQUEST_INITIATED
+   enable MESSAGE_DELIVERY_ATTEMPT
+   enable MESSAGE_DISCARDED
+   enable MESSAGE_QUEUED
+   enable MESSAGE_RECEIVED
+   enable MESSAGE_TRANSMITTED
+   enable SENSOR_DETECTION_ATTEMPT
+   enable SENSOR_TRACK_INITIATED
+   enable SENSOR_TRACK_UPDATED
+   enable SENSOR_TRACK_DROPPED
+   enable TASK_ASSIGNED
+   enable TASK_CANCELED
+   file output/$(CASE).evt
+end_event_output
+
+terrain
+end_terrain
+
+end_time 480 sec

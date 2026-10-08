@@ -1,0 +1,54 @@
+# AFSIM 3d_route_finder demo 的 milsim 复现（对照见同目录 README.md）
+#
+# 原脚本：demos/route_finder_demos/3d_route_finder.txt（AFSIM 2.9.0-v1.0 汉化版）
+#
+# 原 demo 干的事（脚本里那个 3D_ROUTER 处理器）：
+#
+#   对每一层高度 alt（40000 ft 往下到 10000 ft，步长 1000 ft）：
+#       把每个 SAM 当一根**圆柱**规避区，半径 = alt(米) × mRadiusPerAltitude(7.0)
+#       —— 半径**正比于高度**，所以层越低越好绕；
+#       调 WsfRouteFinder 从起点找一条到目标的航路；
+#   在所有这些航路里挑**三维长度最短**的那条，SetRoute 给 striker1。
+#
+# 所以这不是"跟航线"，是"**选路**"——前面几份复现（kinematic_mover、
+# aircraft_mover）比的是"给定航线谁跟得住"，这一份比的是"给定禁飞区谁选得短"。
+#
+# 复现的口径因此也不同：**不跑动力学**，只把这件事在 milsim 里用
+# `NavService.route` 重做一遍（工具 tools/demo_route_finder.py），再与 AFSIM
+# 选出来的那条航路对照。所以这份想定只需要一个战区和一个起点，不需要
+# component_type —— 选路是地图服务的事，与机动件无关。
+#
+# 战区锚点取在**起终点中间**（几内亚湾海面）。半径 185 km 是量出来的：
+# 起点 (0.17462N, 3.86294E) 与终点 (0.31532N, 0.73940E) 相距 347.7 km，
+# 中点 (0.245N, 2.301E) 到两端的距离各是 173 km，185 km 留出余量。
+# resolution 1 km：SAM 半径最小一档是 10000 ft × 7.0 = 21.3 km，21 个格，
+# 圆边界足够细。
+
+simulation
+    name     "AFSIM 3d_route_finder 复现"
+    max_step 0.1 s
+    seed     20260920
+end_simulation
+
+zone SAM_FIELD
+    anchor     0.245 2.301
+    radius     185 km
+    resolution 1 km
+    layers     1
+end_zone
+
+component_type AIR_MOVER
+end_component_type
+
+platform_type ROUTER
+    side blue
+    component mover AIR_MOVER
+    end_component
+end_platform_type
+
+# 起点的经纬度逐字照抄原脚本里 striker1 的第一点。
+# 原脚本的 target 在 (0.31532N, 0.73940E)，高度 35000 ft；工具从 AFSIM 脚本
+# 里读，不在这里重复一遍——**同一件事不留两处真相**。
+platform striker1 ROUTER
+    position latlng 0.17462 3.86294
+end_platform
