@@ -1,0 +1,107 @@
+# =============================================================================
+# 无控弹（火箭弹）：`guidance_slot ""` 就是火箭弹，不是一个制导件
+#
+# 本项目里"无控弹"不是缺了制导件的错误配置，而是一型正经的弹：弹体
+# （`MissileMover`）在没有制导件时只受推力、阻力与重力（`_command` 返回
+# `phase="无控"`），离轨即做重力转向（`γ̇ = −g·cosγ / V`）。想定写法只有
+# 一条要领：**弹体的 `guidance_slot` 显式写空串**，且 `platform_type` 里
+# **不装** guidance 组件——不写 `guidance_slot ""` 的话装配期会报
+# "制导槽 guidance 里没有部件"（写错槽名与漏装都被装配期拦住，静默退化
+# 成无控弹的情形不存在）。
+#
+# ── 射程怎么来：发射角 × 燃料（v0.13.51 实测，探针扫 35 例）──────────────
+#
+# 无控弹的射程由两个参数决定，**没有一个叫 range 的参数**：
+#   · 发射角 `launch_fpa`——低角度离轨速度小、被重力转向压得快（30° 全部
+#     2 s 内撞地）；45°/60° 是中低射程；**75°~80° 是远射程最优角**（真空
+#     里"45° 最优"在有阻力与重力转向时不成立）；近垂直（89°）换弹道高。
+#   · 燃料 `fuel_mass`——决定关机速度，进而决定弹道包线。
+#
+#   mass 800 kg、thrust 66 kN、Isp 250 s、drag_area 0.09 m² 的实测包线
+#   （射程 km / 弹道高点 km / 飞行时间 s，终止原因全部"落地"）：
+#
+#   燃料    30°          45°           60°            75°             89°
+#   100    0.1/0.0/2    3.7/0.2/16    6.6/1.3/36     5.7/2.9/52      0.5/3.8/58
+#   200    0.1/0.0/2    8.7/0.4/22   16.5/3.4/58    16.4/8.7/90      1.5/12.0/104
+#   300    0.1/0.0/2   12.5/0.5/26   25.0/5.4/72    30.2/15.8/122    3.2/23.8/148
+#   400    0.1/0.0/2   15.2/0.5/26   31.9/7.3/84    51.0/25.1/156    6.3/42.9/200
+#   500    0.1/0.0/2   17.1/0.5/26   37.5/8.9/94    89.3/39.6/200   13.0/81.0/276
+#   650    0.1/0.0/2   18.1/0.5/24   41.2/11.1/112 245.2/90.4/316  47.0/263.7/502
+#
+#   mass 1000 kg（净重 200 kg）再往上探一档：
+#   650     —            —             —            121.3/37.1/196   —
+#   800     —            —             —            267.5/68.6/278  482.7/183.1/426（80°）
+#
+#   ⇒ **0~300 km 档由发射角 + 燃料覆盖**：近程用 45°/60° + 小燃料，
+#   300 km 级用 80° + 800 kg。本想定放两枚做演示：一枚 60°/200 kg 打
+#   战区内 16.5 km，一枚 75°/650 kg 打出战区（战区外地面高程取 0，
+#   `MissileMover._ground_z` 的约定）。
+#
+# 与弹道导弹（`BALLISTIC_GUIDANCE`）的分工：火箭弹**没有末段导引**，
+# 落点散布就是发射角与风（本模型不含风）给的——要"打得准"就上制导，
+# 要"打得远"就加燃料，两者在这张表里都是明码标价的。
+# =============================================================================
+
+component_type MISSILE_MOVER
+end_component_type
+
+# 近程档：60° 发射角、200 kg 燃料 → 实测 16.5 km / 弹道高 3.4 km。
+component_type ROCKET_SHORT : MISSILE_MOVER
+    mass             800 kg
+    fuel_mass        200 kg
+    thrust            66 kN
+    specific_impulse 250 s
+    drag_area        0.09 m2
+    max_speed       3000 m/s
+    # 无控弹的命门：**显式写空串**。不写的话默认槽名 guidance，
+    # 装配期报"制导槽里没有部件"。
+    guidance_slot    ""
+    launch_fpa        60 deg
+end_component_type
+
+# 远程档：75° 发射角、650 kg 燃料 → 实测 245 km / 弹道高 90 km。
+component_type ROCKET_LONG : MISSILE_MOVER
+    mass             800 kg
+    fuel_mass        650 kg
+    thrust            66 kN
+    specific_impulse 250 s
+    drag_area        0.09 m2
+    max_speed       3000 m/s
+    guidance_slot    ""
+    launch_fpa        75 deg
+end_component_type
+
+platform_type ROCKET
+    side blue
+    component mover ROCKET_SHORT
+    end_component
+end_platform_type
+
+platform_type ROCKET_FAR
+    side blue
+    component mover ROCKET_LONG
+    end_component
+end_platform_type
+
+zone ROCKET_RANGE
+    anchor     39.05 -89.80
+    radius     90 km
+    resolution 1 km
+    layers     1
+    terrain    flat
+end_zone
+
+# 近程档：从战区中心出发正北 16.5 km 落地（实测包线内）。航向 0 = 北 =
+# y 减小（§5.7 的坐标约定），所以出发点必须在 anchor 上、不能放在北边
+# ——放在北边朝北飞是**朝着战区中心**飞回来（第一版就犯了这个）。
+platform RKT_1 ROCKET
+    position latlng 39.0500 -89.7900
+    heading          0 deg
+end_platform
+
+# 远程档：正北打出战区（245 km > 战区半径 90 km），落点在战区外、
+# 地面高程按 0 处理——这是弹体"战区外依然要落地"的既定约定。
+platform RKT_2 ROCKET_FAR
+    position latlng 39.0500 -89.8000
+    heading          0 deg
+end_platform

@@ -1,4 +1,4 @@
-"""机动件包：一个基类 + 五个参考实现，**各自一个文件**（§5.7、§5.8）。
+"""机动件包：一个基类 + 六个参考实现，**各自一个文件**（§5.7、§5.8）。
 
 .. code-block:: text
 
@@ -9,7 +9,9 @@
     ├── water.py         WaterMover      WATER_MOVER
     ├── subsurface.py    SubsurfaceMover SUBSURFACE_MOVER
     ├── air.py           AirMover        AIR_MOVER
-    └── missile.py       MissileMover    MISSILE_MOVER（按指令积分，跟踪航路点）
+    ├── missile.py       MissileMover    MISSILE_MOVER（按指令积分，跟踪航路点）
+    └── analytic.py      AnalyticBallisticMover
+                         ANALYTIC_BALLISTIC_MOVER（球面弹道解算，逐帧置位）
 
 两条组织约定，都是"以后加第五个件时照抄就行"的那种：
 
@@ -29,6 +31,7 @@
 from __future__ import annotations
 
 from .air import AirMover
+from .analytic import AnalyticBallisticMover
 from .base import (
     BLOCKABLE_TERRAIN,
     MARCH_STEPS_PER_CELL,
@@ -46,6 +49,7 @@ from .water import WaterMover
 #: **加组件只改这一处**（外加新组件自己的那个文件）。
 FRAMEWORK_MOVERS: tuple[type, ...] = (
     AirMover,
+    AnalyticBallisticMover,
     GroundMover,
     MissileMover,
     SubsurfaceMover,
@@ -62,6 +66,7 @@ __all__ = [
     "signed_angle",
     # -- 参考实现 --
     "AirMover",
+    "AnalyticBallisticMover",
     "GroundMover",
     "MissileMover",
     "SubsurfaceMover",

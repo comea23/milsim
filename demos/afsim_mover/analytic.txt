@@ -1,0 +1,104 @@
+# =============================================================================
+# 解析弹道弹：ANALYTIC_BALLISTIC_MOVER（球面弹道一次解算，逐帧置位）
+#
+# 与弹体 + 制导件那套（`MissileMover` + `BALLISTIC_GUIDANCE`）不是一条路：
+# `MissileMover` 是平面 3-DOF（直角坐标、常数 g、无地球曲率），打 85 km
+# 够准，打洲际物理上不成立。本件把整条球面椭圆弹道在**第一次推进前一次
+# 解算出来**（发射点 + 目标点 + 弹道高点 → 闭式根数），之后每帧按开普勒
+# 时间律置位——积分的物理错误从根上就不参与。
+#
+# 想定写法只有两条：
+#   · `target_name` 指向目标平台——打的是**解算时刻**该平台的位置，
+#     之后锁定（洲际弹打装订坐标的作战方式；飞行中目标移走 = 落在旧
+#     位置上判"落地"）。
+#   · `apogee_altitude` 是唯一的形状参数：射程由目标位置定，高点定
+#     "这条弹道有多高、飞多久"。
+#
+# 没有制导件、没有 guidance_slot——弹道没有"想怎么飞"的自由度。
+#
+# ── 物理锚点（tests/test_analytic.py 钉住）─────────────────────────────────
+#   Φ=90°（10008 km）+ 高点 1200 km ⇒ 发射速度 7.2 km/s、全程 31.2 min
+#   ——真实洲际量级（平面模型要 9.9 km/s 才飞得了 10000 km，给不出）。
+#
+# ── 本想定只放 600 / 950 km 两档 ──────────────────────────────────────────
+# 解算本身打到 10000 km 都行（tests/test_analytic.py 用平面坐标直摆，
+# 钉住了 3000 km 与 10008 km 档 + 洲际锚点），但**想定**摆不了：所有
+# 平台必须在战区内，而战区半径上限 1000 km（ZONE_PARAMS 的 maximum）。
+# 想定演示 therefore 贴着上限放一档 950 km，再看一档 600 km。
+# 目标平台用 AIR_MOVER（PROFILE=None）：位置即打击点，没有地形依赖。
+# =============================================================================
+
+component_type ANALYTIC_BALLISTIC_MOVER
+end_component_type
+
+component_type AIR_MOVER
+end_component_type
+
+# 600 km 档：弹道高点 200 km，全程约 367 s。
+component_type SRBM : ANALYTIC_BALLISTIC_MOVER
+    target_name     TGT_600
+    apogee_altitude 200 km
+end_component_type
+
+# 950 km 档：弹道高点 250 km，全程约 465 s。
+component_type MRBM : ANALYTIC_BALLISTIC_MOVER
+    target_name     TGT_950
+    apogee_altitude 250 km
+end_component_type
+
+platform_type SRBM_MISSILE
+    side blue
+    component mover SRBM
+    end_component
+end_platform_type
+
+platform_type MRBM_MISSILE
+    side blue
+    component mover MRBM
+    end_component
+end_platform_type
+
+# 打击点载体：静止悬停的空中平台（不给速度指令就不动）。
+platform_type AIM_POINT
+    side red
+    component mover AIR_MOVER
+    end_component
+end_platform_type
+
+# 战区要罩住 950 km 外的打击点，半径取上限 1000 km（ZONE_PARAMS 的
+# maximum，再大装配期报错）：**所有平台都必须落在某个战区内**——latlng
+# → 米制坐标的投影以战区为基准，战区外没有坐标。格距上限 2000 m；
+# terrain flat 时高程处处为 0，100 万格只费一点内存、不影响弹道。
+zone ANALYTIC_RANGE
+    anchor     39.05 -89.80
+    radius     1000 km
+    resolution 2 km
+    layers     1
+    terrain    flat
+end_zone
+
+# 发射点：战区中心。航向 0 = 北 = y 减小（§5.7 的坐标约定），两枚弹都
+# 打正北。发射点高度取战区地面（flat 0 m）——弹道解算的落点高度等于
+# 发射点高度（球面对称）。
+platform SRBM_1 SRBM_MISSILE
+    position latlng 39.0500 -89.8000
+    heading          0 deg
+end_platform
+
+platform MRBM_1 MRBM_MISSILE
+    position latlng 39.0500 -89.8000
+    heading          0 deg
+end_platform
+
+# 打击点：纬度按 ~111.2 km/° 把 600 / 950 km 摆到正北。落点精确等于
+# 目标的**平面坐标**（解算目标 = 该平台位置），纬度换算的近似不进弹道
+# ——打的就是这个平台所在的位置。平台位置会吸附到战区格网（格距 2 km，
+# 实测 TGT_950 吸附到 y=948 km），弹打的正是吸附后的那个点，两者仍
+# 严格重合。
+platform TGT_600 AIM_POINT
+    position latlng 44.4500 -89.8000
+end_platform
+
+platform TGT_950 AIM_POINT
+    position latlng 47.5900 -89.8000
+end_platform
