@@ -1,0 +1,83 @@
+# =============================================================================
+# 战斗部 WARHEAD：命中概率裁决 + 毁伤结算（§5.17，v0.13.52 – v0.13.54）
+#
+# 本想定在解析弹道弹（§13 的 ANALYTIC_BALLISTIC_MOVER）上加挂一枚战斗部：
+# 弹飞它的球面弹道，战斗部独立巡回弹目距离——进入触发圈（fuse_radius）
+# 后按瑞利脱靶量骨架掷一次骰，中了就把标称毁伤扣到目标头上。
+#
+# ── 想定写法 ────────────────────────────────────────────────────────────────
+#   · 战斗部挂**弹**上，槽名任意（本想定用 damage）；`target_name` 与
+#     弹体 mover 的 target_name 各查各的表，互不依赖。
+#   · 目标的血量与防护是**目标**的平台属性：`max_health`（默认 1.0 =
+#     血条就是完好度本身）、`armor`（默认 1.0 = 无防护）、`max_accel`
+#     （默认 0 = 不机动）。本想定全用默认——一发 250 kg HE 打静止目标
+#     的默认链：0.5 × 1.0 × (250/250)^1 × 1.0 = 0.5 点（默认血条 1.0 =
+#     扣一半）；伤害是点数，写 200 就是 200 点，扣在目标血条上。
+#   · `fuse_radius 5 km` + `check_interval 1 s`：弹末段 2 km/s 级，5 km
+#     圈内约 2.5 s——巡回采样能撞上；撞不上也有穿越插补事件兜底
+#     （弹一个节拍跑 2 km，圈沿判定时刻由插补钉住）。
+#
+# ── 预期结果（tests/test_warhead.py 端到端钉住）────────────────────────────
+#   弹全程约 421 s（600 km / 高点 200 km）；末段进圈判定，目标 TGT_WH
+#   完好度 1.0 → 0.5（默认链扣 0.5 点），战斗部 verdict 含"命中"。
+#   命中 = 起爆：宿主弹体**注销**——从注册表与 store 所有索引摘干净，
+#   什么都没有了（死亡实体停推见 mover 基类 _on_tick）；失的弹不起爆、
+#   继续飞。
+#
+# ── 概率模型的现状 ──────────────────────────────────────────────────────────
+#   骨架（瑞利脱靶量）已定；系数（maneuver_factor / sigma_floor）目前是
+#   物理合理占位，Phase 2 用 AFSIM 大样本统计标定。目标不机动
+#   （max_accel 0）时散布退化为地板（3 m），对 30 m 杀伤半径几乎是必中
+#   ——想给目标"挣扎"能力，给它的 platform_type 写 `max_accel`。
+# =============================================================================
+
+component_type ANALYTIC_BALLISTIC_MOVER
+end_component_type
+
+component_type AIR_MOVER
+end_component_type
+
+component_type WARHEAD
+end_component_type
+
+component_type SRBM_WH : ANALYTIC_BALLISTIC_MOVER
+    target_name     TGT_WH
+    apogee_altitude 200 km
+end_component_type
+
+component_type WH_CHIP : WARHEAD
+    target_name    TGT_WH
+    fuse_radius    5 km
+    check_interval 1 s
+end_component_type
+
+platform_type SRBM_LAUNCHER
+    side blue
+    component mover SRBM_WH
+    end_component
+    component damage WH_CHIP
+    end_component
+end_platform_type
+
+platform_type AIM_POINT
+    side red
+    component mover AIR_MOVER
+    end_component
+end_platform_type
+
+zone WH_RANGE
+    anchor     39.05 -89.80
+    radius     1000 km
+    resolution 2 km
+    layers     1
+    terrain    flat
+end_zone
+
+platform SRBM_1 SRBM_LAUNCHER
+    position latlng 39.0500 -89.8000
+    heading          0 deg
+end_platform
+
+platform TGT_WH AIM_POINT
+    position latlng 44.4500 -89.8000
+end_platform

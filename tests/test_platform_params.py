@@ -172,6 +172,9 @@ def test_platform_type_attributes_are_resolved(
         "side": "",
         "decision": "",
         "radar_cross_section": 1.0,
+        "max_health": 1.0,
+        "armor": 1.0,
+        "max_accel": 0.0,
     }
     assert factory.resolved_platform_params("ARMOR_BASE")["side"] == "red"
     assert factory.resolved_platform_params("ARMOR_MBT")["crew"] == 4
@@ -265,19 +268,29 @@ def test_every_declared_platform_key_is_a_param_spec() -> None:
 def test_the_platform_table_only_holds_keys_someone_reads() -> None:
     """**只加"有人读"的参数。**
 
-    三个键各有消费者（都写在这里，因为这条测试逼的就是这个）：
+    六个键各有消费者（都写在这里，因为这条测试逼的就是这个）：
 
     * ``side`` —— 实体建档时取用；
     * ``decision`` —— 决策接线取用；
     * ``radar_cross_section`` —— **感知层**：雷达的第 5~7 步要拿目标的 RCS 去算
       回波功率（``RadarSensor._rcs_of`` 走 ``mount.target_platform_param``）。
+    * ``max_health`` / ``armor`` / ``max_accel`` —— **战斗部**（§5.17）结算毁伤
+      与算命中概率时读**目标**的这三个属性（``Warhead._target_param``）：
+      血量上限是换算分母、防护是承受比例、机动能力进脱靶量散布。
       呼号、编制等仍然没有消费者，等就位再加。
 
     这条测试**故意**会在加键时失败：它逼着加键的人回答"谁读这个值"。
     §9 第 15 条要消灭的是"写了没人读、拼错也不报错"的平台属性，不是要换
     一张更大的空表。
     """
-    assert set(Platform.PARAMS) == {"side", "decision", "radar_cross_section"}
+    assert set(Platform.PARAMS) == {
+        "side",
+        "decision",
+        "radar_cross_section",
+        "max_health",
+        "armor",
+        "max_accel",
+    }
 
 
 # ---------------------------------------------------------------------------

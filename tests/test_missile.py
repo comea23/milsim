@@ -132,7 +132,7 @@ class FakeEngagement:
 
 
 class FakeView:
-    """``MoverView`` 的四个方法 + 一份轨迹，供"挪了多少"用。"""
+    """``MoverView`` 的五个方法 + 一份轨迹，供"挪了多少"用。"""
 
     def __init__(self, x: float = 0.0, y: float = 0.0, z: float = 0.0,
                  heading: float = 0.0, speed: float = 0.0) -> None:
@@ -140,6 +140,7 @@ class FakeView:
         self.heading, self.speed = heading, speed
         self.cell: Any = None
         self.track: list[tuple[float, float, float]] = [(x, y, z)]
+        self.alive = True
 
     def my_pose(self) -> tuple[float, float, float, float, float]:
         return (self.x, self.y, self.z, self.heading, self.speed)
@@ -149,6 +150,9 @@ class FakeView:
 
     def my_cell(self) -> Any:
         return self.cell
+
+    def my_alive(self) -> bool:
+        return self.alive
 
     def set_pose(self, x: float, y: float, z: float, heading: float = 0.0,
                  speed: float = 0.0) -> None:

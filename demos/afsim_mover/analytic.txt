@@ -34,13 +34,13 @@ end_component_type
 component_type AIR_MOVER
 end_component_type
 
-# 600 km 档：弹道高点 200 km，全程约 367 s。
+# 600 km 档：弹道高点 200 km，全程约 421 s（闭式解算值）。
 component_type SRBM : ANALYTIC_BALLISTIC_MOVER
     target_name     TGT_600
     apogee_altitude 200 km
 end_component_type
 
-# 950 km 档：弹道高点 250 km，全程约 465 s。
+# 950 km 档：弹道高点 250 km，全程约 482 s（闭式解算值）。
 component_type MRBM : ANALYTIC_BALLISTIC_MOVER
     target_name     TGT_950
     apogee_altitude 250 km

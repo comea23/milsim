@@ -58,7 +58,7 @@ class FakeCell:
 
 
 class FakeView:
-    """``MoverView`` 的四个方法。顺手数一下写了几次，好验证"不写"这件事。"""
+    """``MoverView`` 的五个方法。顺手数一下写了几次，好验证"不写"这件事。"""
 
     def __init__(self, x: float = 0.0, y: float = 0.0, z: float = 0.0) -> None:
         self.x, self.y, self.z = x, y, z
@@ -67,6 +67,7 @@ class FakeView:
         self.cell: FakeCell | None = FakeCell(Axial(0, 0))
         self.writes = 0
         self.positions: list[tuple[float, float, float]] = []
+        self.alive = True
 
     def my_pose(self):
         return (self.x, self.y, self.z, self.heading, self.speed)
@@ -76,6 +77,9 @@ class FakeView:
 
     def my_cell(self):
         return self.cell
+
+    def my_alive(self) -> bool:
+        return self.alive
 
     def set_pose(self, x, y, z, heading=0.0, speed=0.0) -> None:
         self.x, self.y, self.z = x, y, z
@@ -251,6 +255,25 @@ def test_first_tick_only_starts_the_clock() -> None:
     assert view.x == pytest.approx(100.0)
     assert mover.travelled_m() == pytest.approx(100.0)
     assert mover.elapsed_s() == pytest.approx(PERIOD_S)
+
+
+def test_destroyed_entity_stops_advancing() -> None:
+    """实体被毁（完好度 0）后机动件停推：残骸留在最后一帧的位置。
+
+    引擎不知道"死亡"、周期事件照常到期——检查在 ``_on_tick``：活着才
+    ``update``。此前被打死的车还会继续跑（位置照旧更新，只有 ``is_alive``
+    变了）。战斗部命中后弹体销毁（§5.17）走的就是这条路。
+    """
+    mover, view, _ = make_mover(max_speed=20.0, linear_accel=0.0)
+    assert mover.move_to_point(1000.0, 0.0, 0.0) is True
+    mover.update(0)                        # 首帧只记开工时刻
+    mover.update(PERIOD_US)                # 正常推进一格
+    assert view.x == pytest.approx(100.0)
+
+    view.alive = False                     # 实体被毁
+    mover._on_tick(None, None)             # 周期事件照常到期
+    assert view.x == pytest.approx(100.0)  # 残骸不动
+    assert view.writes == 1                # 位置一帧都没多写
 
 
 def test_average_speed_matches_the_rating() -> None:

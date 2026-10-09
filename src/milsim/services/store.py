@@ -1536,6 +1536,15 @@ class MoverView:
     def my_cell(self) -> CellRef | None:
         return self._store.cell_of(self._entity_id)
 
+    def my_alive(self) -> bool:
+        """自己的存活状态（完好度 > 0）。
+
+        机动件每帧用它早退：**实体被毁后残骸停在最后一帧的位置**，不再
+        推进。引擎不知道"死亡"、事件照常到期，不挡的话被打死的车还会
+        继续跑（位置照旧更新，只有 ``is_alive`` 变了）。
+        """
+        return self._store.is_alive(self._entity_id)
+
     def set_pose(
         self,
         x: float,

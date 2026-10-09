@@ -535,6 +535,11 @@ class Mover(Component):
     # -- 节拍 --------------------------------------------------------------
 
     def _on_tick(self, engine: Any, event: Any) -> EventResult:
+        if not self.view.my_alive():
+            # 实体已毁（完好度 0）：残骸停在最后一帧的位置，不再推进。
+            # 引擎不知道"死亡"、周期事件照常到期——不在这里挡的话，被
+            # 打死的车还会继续跑（位置照旧更新，只有 is_alive 变了）。
+            return EventResult.RESCHEDULE
         if self.enabled:
             self.update(engine.now)
         return EventResult.RESCHEDULE

@@ -55,6 +55,10 @@ from .controller import (
     Controller,
     HostCheckFn,
 )
+from .damage import (
+    FRAMEWORK_DAMAGE,
+    Warhead,
+)
 from .entity import Entity
 from .guidance import (
     FRAMEWORK_GUIDANCE,
@@ -105,6 +109,7 @@ FRAMEWORK_COMPONENTS: tuple[type, ...] = (
     *FRAMEWORK_TRACKS,
     *FRAMEWORK_JAMMERS,
     *FRAMEWORK_COMMS,
+    *FRAMEWORK_DAMAGE,
 )
 
 #: 框架自带的平台类。``PLATFORM`` 是所有平台类型的隐式根。
@@ -168,6 +173,9 @@ __all__ = [
     "FRAMEWORK_COMMS",
     "CommNode",
     "RfComm",
+    # -- 战斗部（§5.17）--
+    "FRAMEWORK_DAMAGE",
+    "Warhead",
     # -- 侧挂控制器与编队私有状态（§4.5.3①、§3.9.5） --
     "CONTROLLER_LABELS",
     "CONTROLLER_LEVELS",

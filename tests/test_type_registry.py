@@ -34,6 +34,20 @@ from milsim.services.type_registry import (
 )
 
 
+def _reinstall_framework() -> None:
+    """把框架参考实现装回**全局**注册表。
+
+    ``reset_default_registry()`` 清的是全局表的内容——测试隔离的前提是
+    "测完把现场恢复"，否则字母序排在本文件之后的组件测试（它们 import
+    时注册的类已经被清掉）会拿到一张空表。只恢复组件侧：本文件的用例
+    不碰平台表。
+    """
+    from milsim import models
+    from milsim.services.type_registry import default_registry
+
+    models.register_framework(components=default_registry())
+
+
 # ---------------------------------------------------------------------------
 # 定义
 # ---------------------------------------------------------------------------
@@ -365,6 +379,7 @@ def test_register_component_decorator_uses_default_registry() -> None:
     assert default_registry().get("TEST_RADAR") is TestRadar
     assert TestRadar.COMPONENT_NAME == "TEST_RADAR"      # 便于调试
     reset_default_registry()
+    _reinstall_framework()
 
 
 def test_decorator_returns_class_unchanged() -> None:
@@ -380,6 +395,7 @@ def test_decorator_returns_class_unchanged() -> None:
     assert Sub.__name__ == "Sub"
     assert "detect" in Sub.__dict__              # 方法还挂在原类上，没被搬走
     reset_default_registry()
+    _reinstall_framework()
 
 
 # ---------------------------------------------------------------------------
@@ -516,10 +532,16 @@ def test_factory_without_arguments_uses_default_registry() -> None:
 
 @pytest.fixture(autouse=True)
 def _clean_default_registry():
-    """每条测试前后都清空全局注册表，避免互相污染。"""
+    """每条测试前后都清空全局注册表，避免互相污染。
+
+    ★ 结尾清空之后要把框架参考实现装回去：清空的代价不能转嫁给
+    字母序排在本文件后面的测试（它们的类是在 import 时注册进全局
+    表的，清一次就全没了）。
+    """
     reset_default_registry()
     yield
     reset_default_registry()
+    _reinstall_framework()
 
 
 def test_user_extension_workflow_end_to_end() -> None:
