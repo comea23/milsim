@@ -106,7 +106,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
-from math import cos, hypot, isfinite, radians, sin, sqrt
+from math import cos, hypot, inf, isfinite, radians, sin, sqrt
 
 from ...engine import PRIORITY_SENSOR, EventResult
 from ...errors import ConfigurationError
@@ -457,6 +457,7 @@ class RadarSensor(Component):
         "errors_from_snr",
         "_hits",
         "_tracks",
+        "_last_meas",
         "detections",
         "geometry_blocked",
         "last_pd",
@@ -522,6 +523,12 @@ class RadarSensor(Component):
         self._hits: dict[int, deque[bool]] = {}
         #: 已建航的目标。
         self._tracks: set[int] = set()
+        #: 每个目标**上一次量测** ``(时刻 us, x, y, z, σ_pos)``——速度估计的
+        #: 基准。速度 = 相邻两次**带噪量测**的差分（不是真值差分），σv =
+        #: ``hypot(σ₁, σ₂)/Δt``（两个独立位置误差传播到差分上）。
+        #: 目标注销时随 ``_forget`` 一起清（ID 会复用，不清会把旧目标的
+        #: 速度安到新目标头上）。
+        self._last_meas: dict[int, tuple[int, float, float, float, float]] = {}
         self.detections = 0
         self.geometry_blocked = 0
         self.last_pd = 0.0
@@ -893,8 +900,10 @@ class RadarSensor(Component):
         # 此时**不加噪**：``gauss(0, inf)`` 会给 nan，而一个 nan 位置会沿着
         # 航迹表一路带下去，比"没加误差"危险得多。**但偏置照旧生效**——它是
         # 中心被挪走，与这次采样准不准是两件事。
+        # σ_position 也一并返回（v0.13.56）：非有限时返回 ``inf``，由调用方
+        # 洗成 0（"没有精度" ⇒ 这条航迹不参与融合）。
         if not (isfinite(sigma_bearing) and isfinite(sigma_range)):
-            return bearing_deg, horizontal_m
+            return bearing_deg, horizontal_m, inf
 
         measured_bearing = bearing_deg
         if sigma_bearing > 0.0:
@@ -909,7 +918,13 @@ class RadarSensor(Component):
             measured_horizontal = sqrt(
                 max(0.0, measured_slant * measured_slant - dz * dz)
             )
-        return measured_bearing, measured_horizontal
+        # 位置不确定度合成成一个标量：径向（σ_R）与切向（R·σ_θ）两支正交，
+        # 总均方误差是两者之和（§5.12.9）。取**斜距**做切向臂长——σ_θ 是
+        # 角度，乘在"量测发生在多远"上。
+        sigma_position = hypot(
+            sigma_range, biased_slant * radians(sigma_bearing)
+        )
+        return measured_bearing, measured_horizontal, sigma_position
 
     # -- 第 6 步的干扰项：S/(N+J)（§5.14）----------------------------------
 
@@ -1856,7 +1871,7 @@ class RadarSensor(Component):
         # ---- 第 7b 步：量测误差 ----
         # ★ 放在**命中之后**：误差不参与 hit 判定。让它参与的话，Pd 就等于在
         # "命中判一次、量测再判一次"里被算了两次，实测命中率与设计值对不上。
-        measured_bearing, measured_horizontal = self._measure(
+        measured_bearing, measured_horizontal, sigma_pos = self._measure(
             bearing,
             horizontal,
             slant,
@@ -1866,8 +1881,33 @@ class RadarSensor(Component):
             range_bias_m=effect.range_bias_m,
             azimuth_bias_deg=effect.azimuth_bias_deg,
         )
+        # 非有限 σ（SNR 发散）洗成 0：没有精度可言的航迹不参与融合，
+        # 走覆盖更新（与 v0.13.55 逐字同一行为）。
+        if not isfinite(sigma_pos) or sigma_pos <= 0.0:
+            sigma_pos = 0.0
         angle = radians(measured_bearing)
-        self.view.add_contact(
+        px = me[0] + measured_horizontal * sin(angle)
+        py = me[1] - measured_horizontal * cos(angle)
+        pz = target[2]
+
+        # 速度估计：与上一次**量测**差分（带噪位置对带噪位置，不是真值）。
+        # σv = hypot(σ₁, σ₂)/Δt——两个独立位置误差传播到差分上。没有前一次
+        # 量测（首次照射）或没开误差模型时给 0 = "未知"，融合在 store 那一侧
+        # 会因门槛不齐而退化成覆盖更新，不需要这里再做一套判断。
+        est_vx = est_vy = est_vz = 0.0
+        sigma_vel = 0.0
+        prev = self._last_meas.get(target_id)
+        if prev is not None and sigma_pos > 0.0:
+            t1, x1, y1, z1, s1 = prev
+            dt_s = (engine.now - t1) / 1_000_000
+            if dt_s > 0.0:
+                est_vx = (px - x1) / dt_s
+                est_vy = (py - y1) / dt_s
+                est_vz = (pz - z1) / dt_s
+                sigma_vel = hypot(s1, sigma_pos) / dt_s
+        self._last_meas[target_id] = (engine.now, px, py, pz, sigma_pos)
+
+        self.view.merge_contact(
             target_id,
             quality=pd,
             detected_at=engine.now,
@@ -1875,12 +1915,19 @@ class RadarSensor(Component):
             range_m=measured_horizontal,
             # 极坐标 → 直角坐标。★ 与 KinematicsTable.advance_all 同一套几何：
             # dx = d·sinθ、dy = −d·cosθ（0° 指北，y 轴指南）。
-            x=me[0] + measured_horizontal * sin(angle),
-            y=me[1] - measured_horizontal * cos(angle),
-            z=target[2],
+            x=px,
+            y=py,
+            z=pz,
             # 敌我状态在**量测这一刻**判出来写进航迹（v0.13.33）：航迹一旦上路，
             # 接收方手里没有阵营信息，只能靠这个字段。
             iff=self._iff_of(target_id),
+            # 精度与速度（v0.13.56）：σ>0 的航迹在同目标再写时按精度加权
+            # 融合，而不是谁后写谁赢（§5.13.5）。
+            sigma_pos_m=sigma_pos,
+            sigma_vel_mps=sigma_vel,
+            vx=est_vx,
+            vy=est_vy,
+            vz=est_vz,
         )
         self.contacts_seen.append(target_id)
 
@@ -2039,6 +2086,9 @@ class RadarSensor(Component):
         这是"幽灵航迹"：目标已经不在世，雷达表上还挂着它，而这一步不报任何错。
         """
         self._hits.pop(target_id, None)
+        # 速度基准也要清：实体注销后 ID 复用，不清的话新目标出生就带着
+        # 旧目标的速度——第一次融合就会把位置往旧目标的航迹方向拉。
+        self._last_meas.pop(target_id, None)
         if target_id in self._tracks:
             self._tracks.discard(target_id)
             self.view.drop_contact(target_id)

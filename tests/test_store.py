@@ -976,3 +976,129 @@ def test_identity_and_state_are_stitched_by_id_only() -> None:
     assert store.entities_at(ref(6, 0)) == []
     assert store.validate() == []
     assert registry.validate() == []
+
+
+# ---------------------------------------------------------------------------
+# 按精度融合（v0.13.56，§5.13.5）
+#
+# 前提都在量测里：σ（位置/速度）与速度估计随量测上路。双方都带 σ 才有
+# "精度"可加权；旧航迹还要有速度才能把旧估计时间对齐到来者时刻——
+# 缺任何一样就退化为覆盖更新（"replaced"，与 v0.13.55 逐字同一行为）。
+# ---------------------------------------------------------------------------
+
+
+def _sigma_track(
+    store: EntityStore, owner: int, *, at: int, x: float,
+    sigma: float = 100.0, sv: float = 50.0, vx: float = 50.0,
+) -> tuple[Contact, str]:
+    """给 owner 造一条**带精度与速度**的本机量测航迹（正东 x 米）。"""
+    return store.sensor_view(owner).merge_contact(
+        _T, quality=0.8, detected_at=at, bearing_deg=90.0, range_m=x,
+        x=x, y=0.0, z=0.0,
+        sigma_pos_m=sigma, sigma_vel_mps=sv, vx=vx, vy=0.0, vz=0.0,
+    )
+
+
+def test_fusion_weights_two_estimates_by_precision(store: EntityStore) -> None:
+    """两个都带 σ 的估计 ⇒ 时间对齐后按 1/σ² 加权，σ 收缩。
+
+    手算（Δt=2 s，旧速度 50 m/s，两支位置 σ 都是 100 m、σv 都是 50 m/s）：
+    旧估计对齐到 1000+50·2 = 1100 m；σa² = 100²+(50·2)² = 20000，
+    w_a = 1/20000、w_b = 1/10000 ⇒
+    x = (w_a·1100 + w_b·1200)/(w_a+w_b) = 1166.67 m，
+    σ = 1/√(w_a+w_b) = 81.65 m——**比任何一支都小**，这就是融合的收益。
+    """
+    _sigma_track(store, _A, at=1_000_000, x=1000.0)
+    contact, verdict = store.sensor_view(_A).merge_contact(
+        _T, quality=0.6, detected_at=3_000_000, bearing_deg=90.0,
+        range_m=1200.0, x=1200.0, y=0.0, z=0.0,
+        sigma_pos_m=100.0, sigma_vel_mps=50.0, vx=100.0, vy=0.0, vz=0.0,
+    )
+    assert verdict == "fused"
+    assert contact.x == pytest.approx(1166.667, abs=0.01)
+    assert contact.sigma_pos_m == pytest.approx(81.6497, abs=0.01)
+    # 速度同样逆方差加权：(50+100)/2 = 75，σv = 1/√(2/50²) = 35.36
+    assert contact.vx == pytest.approx(75.0)
+    assert contact.sigma_vel_mps == pytest.approx(35.3553, abs=0.01)
+    # quality 按同权重平均：(0.8·w_a + 0.6·w_b)/(w_a+w_b)
+    assert contact.quality == pytest.approx(0.6667, abs=0.001)
+    assert contact.detected_at == 3_000_000
+
+
+def test_fusion_degrades_to_replacement_without_sigma(store: EntityStore) -> None:
+    """任一侧 σ=0 ⇒ 覆盖更新。
+
+    这是**兼容闸门**：没开误差模型的传感器写的航迹没有"精度"可言，
+    没有精度就没有权重——整条融合链在第一道门槛就让位，行为与
+    v0.13.55 逐字相同。
+    """
+    _sigma_track(store, _A, at=1_000_000, x=1000.0)
+    contact, verdict = store.sensor_view(_A).merge_contact(
+        _T, quality=0.6, detected_at=3_000_000, bearing_deg=90.0,
+        range_m=1200.0, x=1200.0, y=0.0, z=0.0,      # 来者没给 σ
+    )
+    assert verdict == "replaced"
+    assert contact.x == 1200.0
+    assert contact.sigma_pos_m == 0.0
+
+
+def test_fusion_needs_a_velocity_to_align(store: EntityStore) -> None:
+    """旧航迹没有速度 ⇒ 不敢跨时刻平均，覆盖更新。
+
+    动目标隔 2 s 就是 600 m 的系统性错位：没有速度估计就没有时间对齐
+    的手段，硬平均不是融合是把航迹抹糊。这是刻意从严——速度缺失时
+    "新者胜"永远不比"硬平均"差。
+    """
+    store.sensor_view(_A).merge_contact(
+        _T, quality=0.8, detected_at=1_000_000, bearing_deg=90.0,
+        range_m=1000.0, x=1000.0, y=0.0, z=0.0,
+        sigma_pos_m=100.0, sigma_vel_mps=50.0, vx=0.0, vy=0.0, vz=0.0,
+    )
+    contact, verdict = store.sensor_view(_A).merge_contact(
+        _T, quality=0.6, detected_at=3_000_000, bearing_deg=90.0,
+        range_m=1200.0, x=1200.0, y=0.0, z=0.0,
+        sigma_pos_m=100.0, sigma_vel_mps=50.0, vx=100.0, vy=0.0, vz=0.0,
+    )
+    assert verdict == "replaced"
+    assert contact.x == 1200.0
+
+
+def test_fusion_yields_when_alignment_is_poor(store: EntityStore) -> None:
+    """速度不可信（σv 大）⇒ 旧估计权重趋于 0，融合温和地退化为"新者胜"。
+
+    σv=1000 m/s、Δt=2 s ⇒ 对齐项 σv²Δt² = 4e6 压倒 σ² = 1e4，
+    w_a ≈ 2.49e-7 对 w_b = 1e-4——融合位置离来者不足 1 m。没有这条
+    自限，"融合"会把快目标的航迹拖回旧估计，比不融合更糟；有了它，
+    融合与覆盖更新之间不需要任何硬窗口参数。
+    """
+    _sigma_track(store, _A, at=1_000_000, x=1000.0, sv=1000.0)
+    contact, verdict = store.sensor_view(_A).merge_contact(
+        _T, quality=0.6, detected_at=3_000_000, bearing_deg=90.0,
+        range_m=1200.0, x=1200.0, y=0.0, z=0.0,
+        sigma_pos_m=100.0, sigma_vel_mps=50.0, vx=100.0, vy=0.0, vz=0.0,
+    )
+    assert verdict == "fused"
+    assert contact.x == pytest.approx(1200.0, abs=1.0)
+
+
+def test_relay_fuses_a_precision_report(store: EntityStore) -> None:
+    """A 的带 σ 报告到 B，与 B 自己的同目标航迹融合，结论是 "fused"。
+
+    通信路径的融合与本地路径走同一个 merge_contact：报文带 σ 就加权，
+    不带就覆盖——两条来路一个语义。跳数跟主贡献方：来者权重更大，
+    融合后的 hops 是来者那一支的（0+1）。
+    """
+    _sigma_track(store, _B, at=1_000_000, x=1000.0)
+    payload = Contact(
+        target_id=_T, quality=0.6, detected_at=3_000_000,
+        bearing_deg=90.0, range_m=1200.0, x=1200.0, y=0.0, z=0.0,
+        origin_id=_A, hops=0,
+        sigma_pos_m=100.0, sigma_vel_mps=50.0, vx=100.0,
+    ).as_dict(sender_id=_A)
+    contact, verdict = store.track_view(_B).relay_contact(
+        payload, sender_id=_A, received_at=3_000_000
+    )
+    assert verdict == "fused"
+    assert contact is not None
+    assert contact.sigma_pos_m == pytest.approx(81.6497, abs=0.01)
+    assert contact.hops == 1

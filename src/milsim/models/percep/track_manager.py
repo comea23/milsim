@@ -31,12 +31,15 @@
     飞机当成两架、或把两架当成一架）出不来。要那种能力得走"量测级接口"，
     那是另一条路（§9-45）。
 
-    **融合也只落了一半。** AFSIM 的 ``fusion_method`` 有 ``replacement`` 与
-    ``weighted_average``。我们只落了 ``replacement``（新者胜，见
-    :meth:`~milsim.services.store.EntityStore.relay_contact`）：加权平均要
-    每个来源的**位置不确定度**，而 ``Contact`` 里没有 σ —— ``quality`` 是
-    **检测概率 Pd**，不是精度。拿 Pd 当权重是"用一个不是精度的数冒充精度"，
-    这里不做（§9-45）。
+    **融合落在 ``replacement`` + 精度加权两级。** AFSIM 的 ``fusion_method``
+    有 ``replacement`` 与 ``weighted_average``。``replacement``（新者胜）是
+    基础档：报文没带精度（σ=0）时就是它，与 v0.13.55 逐字相同。
+    ``weighted_average``（v0.13.56 落地）：报文带 σ 的同目标报告**时间对齐**
+    后按 ``1/σ²`` 加权平均（§5.13.5）——两个来源都看一眼，比只看一个准。
+    当年不落它的理由（``Contact`` 没有 σ、``quality`` 是 Pd 不是精度）已经
+    解决：σ 由传感器第 7b 步算出后**随量测上路**（``sigma_pos_m``），
+    融合的权重用的是 σ 而不是 Pd。**关联层依旧不存在**（真值 ID 接口下
+    退化为按 ``target_id`` 归并），真关联错误仍出不来（§9-45）。
 
 .. warning::
 
@@ -65,13 +68,14 @@ from ..component import Component
 #: "某一帧特别慢"变得无法归因。
 TRACK_PERIOD_US = 3_000_000
 
-#: ``relay_contact`` 的四种处理结论 → 计数器字段名。
+#: ``relay_contact`` 的五种处理结论 → 计数器字段名。
 #: **一张表，两处不再各写一遍**：加一种结论时漏改一处会让统计悄悄少一项。
 _VERDICT_COUNTERS = {
     "accepted": "absorbed",
     "circular": "rejected_circular",
     "hops": "rejected_hops",
     "stale": "rejected_stale",
+    "fused": "fused",
 }
 
 
@@ -130,6 +134,7 @@ class TrackManager(Component):
         "_next_share_us",
         "ticks",
         "absorbed",
+        "fused",
         "rejected_circular",
         "rejected_hops",
         "rejected_stale",
@@ -153,6 +158,7 @@ class TrackManager(Component):
         self._next_share_us = 0
         self.ticks = 0
         self.absorbed = 0
+        self.fused = 0
         self.rejected_circular = 0
         self.rejected_hops = 0
         self.rejected_stale = 0
@@ -269,6 +275,7 @@ class TrackManager(Component):
         return {
             "ticks": self.ticks,
             "absorbed": self.absorbed,
+            "fused": self.fused,
             "rejected_circular": self.rejected_circular,
             "rejected_hops": self.rejected_hops,
             "rejected_stale": self.rejected_stale,

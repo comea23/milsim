@@ -233,6 +233,11 @@ class Contact:
         "hops",
         "phantom",
         "iff",
+        "sigma_pos_m",
+        "sigma_vel_mps",
+        "vx",
+        "vy",
+        "vz",
     )
 
     target_id: int
@@ -269,6 +274,24 @@ class Contact:
     #: ★ 与 ``phantom`` 一样**要跟着上路**：转发链上每一跳原样保留。洗掉它的
     #: 症状是"友邻把你的敌人当成了自己人"，而位置、时间戳全都正常。
     iff: str = IFF_UNKNOWN
+    #: **位置不确定度**（米，1σ 标量，``hypot(σ_R, R·σ_θ)``——距离与切向两支
+    #: 合成一个各向同性等效值）。``0`` = **未知**：传感器没开误差模型（两条
+    #: σ 参数/``compute_measurement_errors`` 都没给），这条航迹**不参与融合**
+    #: ——没有"精度"就没有权重，融合退化成覆盖更新。标量而不是 (σ_θ, σ_R)
+    #: 两支的理由：融合要跨来源加权，各支误差椭圆随各自量测者的朝向转，
+    #: 迭代融合之后"椭圆相对谁的朝向"就没有意义了；迹（矩阵）不变量
+    #: （位置的总均方误差）才是跨来源可加的量。
+    sigma_pos_m: float = 0.0
+    #: **速度估计的不确定度**（m/s，1σ 标量）。``0`` = 未知 ⇒ 该航迹**不敢
+    #: 当对齐的基准**（外推误差没有界），融合对它退化为覆盖更新。
+    sigma_vel_mps: float = 0.0
+    #: **速度估计**（m/s）——传感器用**相邻两次带噪量测**差分得出，不是真值。
+    #: 零向量 = 未知（首次量测没有差分的基准）。融合用它把旧估计**时间对齐**
+    #: 到来者时刻，再按精度加权平均；没有它，跨时刻的两个位置直接平均会把
+    #: 动目标抹糊（300 m/s 的目标隔 2 s 就是 600 m 的系统性错位）。
+    vx: float = 0.0
+    vy: float = 0.0
+    vz: float = 0.0
 
     def as_dict(self, *, sender_id: int) -> dict[str, Any]:
         """线格式：**扁平 dict，键名与字段同名**。
@@ -300,6 +323,11 @@ class Contact:
             "hops": self.hops,
             "phantom": self.phantom,
             "iff": self.iff,
+            "sigma_pos_m": self.sigma_pos_m,
+            "sigma_vel_mps": self.sigma_vel_mps,
+            "vx": self.vx,
+            "vy": self.vy,
+            "vz": self.vz,
         }
 
     @classmethod
@@ -896,6 +924,11 @@ class EntityStore:
         hops: int = 0,
         phantom: bool = False,
         iff: str = IFF_UNKNOWN,
+        sigma_pos_m: float = 0.0,
+        sigma_vel_mps: float = 0.0,
+        vx: float = 0.0,
+        vy: float = 0.0,
+        vz: float = 0.0,
     ) -> Contact:
         """把一条航迹写进**自己**的域。
 
@@ -908,6 +941,11 @@ class EntityStore:
         ``phantom`` 见 :attr:`Contact.phantom`。★ **覆盖更新时它也要跟着写**：
         这一支是逐字段赋值的，漏掉一个字段的症状是"同一个目标上一拍是幽灵、
         这一拍变成真的（或反过来）"，而位置与时间戳全都正常。
+
+        σ 与速度（v0.13.56）同一条纪律：**给了多少写多少，不给就写 0**。
+        覆盖更新把 σ 一并覆盖——上一拍的精度不能冒充这一拍的（量测没了，
+        精度也就没了）；要不要**用**这些 σ 做加权是 :meth:`merge_contact`
+        的事，本方法只负责忠实记账。
         """
         self._require(owner_id)
         contacts = self._contacts.setdefault(owner_id, [])
@@ -924,6 +962,11 @@ class EntityStore:
                 existing.hops = hops
                 existing.phantom = phantom
                 existing.iff = iff
+                existing.sigma_pos_m = sigma_pos_m
+                existing.sigma_vel_mps = sigma_vel_mps
+                existing.vx = vx
+                existing.vy = vy
+                existing.vz = vz
                 return existing
 
         contact = Contact(
@@ -939,9 +982,194 @@ class EntityStore:
             hops=hops,
             phantom=phantom,
             iff=iff,
+            sigma_pos_m=sigma_pos_m,
+            sigma_vel_mps=sigma_vel_mps,
+            vx=vx,
+            vy=vy,
+            vz=vz,
         )
         contacts.append(contact)
         return contact
+
+    def merge_contact(
+        self,
+        owner_id: int,
+        target_id: int,
+        *,
+        quality: float,
+        detected_at: int,
+        bearing_deg: float,
+        range_m: float,
+        x: float,
+        y: float,
+        z: float,
+        origin_id: int = ORIGIN_LOCAL,
+        hops: int = 0,
+        phantom: bool = False,
+        iff: str = IFF_UNKNOWN,
+        sigma_pos_m: float = 0.0,
+        sigma_vel_mps: float = 0.0,
+        vx: float = 0.0,
+        vy: float = 0.0,
+        vz: float = 0.0,
+    ) -> tuple[Contact, str]:
+        """按精度融合地写航迹：能融合就融合，不能就退化为覆盖更新。
+
+        返回 ``(航迹, 处理方式)``，处理方式 ``"fused"``（加权融合）或
+        ``"replaced"``（覆盖更新，与 :meth:`add_contact` 逐字同一行为）。
+
+        **融合的门槛（缺一即退化，退化是常态而非异常）**：
+
+        1. **双方都有位置 σ**——``sigma_pos_m`` 为 0 = 传感器没开误差模型，
+           没有"精度"可加权。这是**兼容闸门**：没给 σ 参数的想定，行为与
+           v0.13.55 逐字相同；
+        2. **来者严格更新**（``detected_at`` 更大）——同刻报告不值得平均
+           （权重 game 无信息增益时只添乱），旧的更不会被新报告倒灌；
+        3. **旧航迹有速度估计**——融合先把旧估计**时间对齐**到来者时刻，
+           没有速度就没有对齐手段，跨时刻的两个位置直接平均会把动目标
+           抹糊（300 m/s 的目标隔 2 s 就是 600 m 的系统性错位）；
+        4. **旧航迹的速度 σ 有限**——``sigma_vel_mps`` 为 0 = "不知道自己
+           的速度估计有多准"，拿它外推是拿无界的误差当有界的用。
+
+        融合本身是**逆方差加权**（§5.13.5）：旧估计按自身速度推到
+        ``detected_at`` 时刻（对齐把速度误差也吃进 σ²），两个估计各按
+        ``1/σ²`` 加权平均；融合后的 σ² 收缩为 ``1/(1/σ₁²+1/σ₂²)``——
+        两个来源都看一眼，比只看其中一个准，这就是融合的全部收益来源。
+        """
+        self._require(owner_id)
+        existing = self._find_contact(owner_id, target_id)
+        if existing is not None:
+            fused = self._try_fuse(
+                existing,
+                quality=quality,
+                detected_at=detected_at,
+                bearing_deg=bearing_deg,
+                range_m=range_m,
+                x=x,
+                y=y,
+                z=z,
+                origin_id=origin_id,
+                hops=hops,
+                phantom=phantom,
+                iff=iff,
+                sigma_pos_m=sigma_pos_m,
+                sigma_vel_mps=sigma_vel_mps,
+                vx=vx,
+                vy=vy,
+                vz=vz,
+            )
+            if fused is not None:
+                return fused, "fused"
+        return (
+            self.add_contact(
+                owner_id,
+                target_id,
+                quality=quality,
+                detected_at=detected_at,
+                bearing_deg=bearing_deg,
+                range_m=range_m,
+                x=x,
+                y=y,
+                z=z,
+                origin_id=origin_id,
+                hops=hops,
+                phantom=phantom,
+                iff=iff,
+                sigma_pos_m=sigma_pos_m,
+                sigma_vel_mps=sigma_vel_mps,
+                vx=vx,
+                vy=vy,
+                vz=vz,
+            ),
+            "replaced",
+        )
+
+    @staticmethod
+    def _try_fuse(
+        existing: Contact,
+        *,
+        quality: float,
+        detected_at: int,
+        bearing_deg: float,
+        range_m: float,
+        x: float,
+        y: float,
+        z: float,
+        origin_id: int,
+        hops: int,
+        phantom: bool,
+        iff: str,
+        sigma_pos_m: float,
+        sigma_vel_mps: float,
+        vx: float,
+        vy: float,
+        vz: float,
+    ) -> Contact | None:
+        """对同目标的两条估计做一次融合，不可融合返回 ``None``。
+
+        ★ 返回 ``None`` 时**一个字段都没动**——调用方随即走覆盖更新，
+        两条路在"动没动数据"上不会出现第三种状态。
+        """
+        if sigma_pos_m <= 0.0 or existing.sigma_pos_m <= 0.0:
+            return None
+        if detected_at <= existing.detected_at:
+            return None
+        if existing.vx == 0.0 and existing.vy == 0.0 and existing.vz == 0.0:
+            return None
+        if existing.sigma_vel_mps <= 0.0:
+            return None
+
+        dt_s = (detected_at - existing.detected_at) / 1_000_000
+        # 时间对齐：旧估计按它自己的速度估计推到来者时刻。对齐不是白拿的——
+        # 速度估计有自己的误差，外推越远它吃进去越多（σ² += σv²·Δt²），
+        # 于是"对不齐的两条"自动地几乎只剩来者的权重，融合温和地退化为
+        # "新者胜"，不需要任何额外的窗口参数去硬卡。
+        aligned_x = existing.x + existing.vx * dt_s
+        aligned_y = existing.y + existing.vy * dt_s
+        aligned_z = existing.z + existing.vz * dt_s
+        var_a = existing.sigma_pos_m**2 + (existing.sigma_vel_mps * dt_s) ** 2
+        var_b = sigma_pos_m**2
+        w_a = 1.0 / var_a
+        w_b = 1.0 / var_b
+        w = w_a + w_b
+
+        # 极坐标（range/bearing）与来源链（origin/hops）描述的是"这条量测
+        # 是谁在什么几何关系下测的"——融合后的位置不再对应任何一条量测线，
+        # 所以这两个字段跟**主贡献方**（权重大者）走，并在类文档里注明
+        # "融合航迹的极坐标是主贡献量测的极坐标，不是融合位置的极坐标"。
+        if w_a >= w_b:
+            prim_bearing, prim_range = existing.bearing_deg, existing.range_m
+            prim_origin, prim_hops = existing.origin_id, existing.hops
+        else:
+            prim_bearing, prim_range = bearing_deg, range_m
+            prim_origin, prim_hops = origin_id, hops
+
+        existing.quality = (w_a * existing.quality + w_b * quality) / w
+        existing.detected_at = detected_at
+        existing.bearing_deg = prim_bearing
+        existing.range_m = prim_range
+        existing.x = (w_a * aligned_x + w_b * x) / w
+        existing.y = (w_a * aligned_y + w_b * y) / w
+        existing.z = (w_a * aligned_z + w_b * z) / w
+        existing.origin_id = prim_origin
+        existing.hops = prim_hops
+        # phantom / iff 是"这一刻这条航迹是什么"的判断，跟**来者**走：
+        # 它是在更新时刻判的，比旧的判断新鲜。
+        existing.phantom = phantom
+        existing.iff = iff
+
+        # 速度：同样逆方差加权；来者没给 σv（它的首次量测）时权重为 0，
+        # 速度与 σv 原样保留——那是手里唯一的速度信息。
+        if sigma_vel_mps > 0.0:
+            iv_a = 1.0 / existing.sigma_vel_mps**2
+            iv_b = 1.0 / sigma_vel_mps**2
+            iv = iv_a + iv_b
+            existing.vx = (iv_a * existing.vx + iv_b * vx) / iv
+            existing.vy = (iv_a * existing.vy + iv_b * vy) / iv
+            existing.vz = (iv_a * existing.vz + iv_b * vz) / iv
+            existing.sigma_vel_mps = 1.0 / sqrt(iv)
+        existing.sigma_pos_m = 1.0 / sqrt(w)
+        return existing
 
     def relay_contact(
         self,
@@ -993,32 +1221,40 @@ class EntityStore:
             return previous, "stale"
 
         self._relayed += 1
-        return (
-            self.add_contact(
-                owner_id,
-                incoming.target_id,
-                quality=incoming.quality,
-                detected_at=incoming.detected_at,
-                bearing_deg=incoming.bearing_deg,
-                range_m=incoming.range_m,
-                x=incoming.x,
-                y=incoming.y,
-                z=incoming.z,
-                # ★ 原始量测者逐跳原样保留：洗成"转发方"就没有防回环了，
-                #   而且"这情报是谁测的"这个最要紧的元数据会丢。
-                origin_id=incoming.origin_id,
-                hops=incoming.hops + 1,
-                # ★ 「这条航迹是假目标」也要跟着走上路：假目标的任务就是污染
-                #   对方的情报链，拦在本平台等于把干扰的效果限制在单平台
-                #   （§9-53）。这里漏一个字段的症状极隐蔽——**转发之后它就被
-                #   洗成真目标**，而位置、时间戳、来源标记全都正常。
-                phantom=incoming.phantom,
-                # ★ 敌我状态逐跳原样保留（同 ``phantom`` 的理由）：洗掉它
-                #   的症状是"友邻把你的敌人当成了自己人"。
-                iff=incoming.iff,
-            ),
-            "accepted",
+        contact, how = self.merge_contact(
+            owner_id,
+            incoming.target_id,
+            quality=incoming.quality,
+            detected_at=incoming.detected_at,
+            bearing_deg=incoming.bearing_deg,
+            range_m=incoming.range_m,
+            x=incoming.x,
+            y=incoming.y,
+            z=incoming.z,
+            # ★ 原始量测者逐跳原样保留：洗成"转发方"就没有防回环了，
+            #   而且"这情报是谁测的"这个最要紧的元数据会丢。
+            origin_id=incoming.origin_id,
+            hops=incoming.hops + 1,
+            # ★ 「这条航迹是假目标」也要跟着走上路：假目标的任务就是污染
+            #   对方的情报链，拦在本平台等于把干扰的效果限制在单平台
+            #   （§9-53）。这里漏一个字段的症状极隐蔽——**转发之后它就被
+            #   洗成真目标**，而位置、时间戳、来源标记全都正常。
+            phantom=incoming.phantom,
+            # ★ 敌我状态逐跳原样保留（同 ``phantom`` 的理由）：洗掉它
+            #   的症状是"友邻把你的敌人当成了自己人"。
+            iff=incoming.iff,
+            # 精度与速度跟着报文走（v0.13.56）：有 σ 才有得融合，
+            # 没有的报文在这道闸门外就退化成覆盖更新了。
+            sigma_pos_m=incoming.sigma_pos_m,
+            sigma_vel_mps=incoming.sigma_vel_mps,
+            vx=incoming.vx,
+            vy=incoming.vy,
+            vz=incoming.vz,
         )
+        # ★ hops 在 merge 里已经 +1：融合时它跟主贡献方走（取的是
+        #   existing.hops 与 incoming.hops+1 里的主贡献方），覆盖更新时
+        #   直接就是 +1 后的值——两路都不会把转发链的长度记丢。
+        return contact, ("fused" if how == "fused" else "accepted")
 
     def _find_contact(self, owner_id: int, target_id: int) -> Contact | None:
         for contact in self._contacts.get(owner_id, ()):
@@ -1503,6 +1739,51 @@ class SensorView:
 
     def my_contacts(self) -> list[Contact]:
         return self._store.contacts_of(self._entity_id)
+
+    def merge_contact(
+        self,
+        target_id: int,
+        *,
+        quality: float,
+        detected_at: int,
+        bearing_deg: float,
+        range_m: float,
+        x: float,
+        y: float,
+        z: float,
+        phantom: bool = False,
+        iff: str = IFF_UNKNOWN,
+        sigma_pos_m: float = 0.0,
+        sigma_vel_mps: float = 0.0,
+        vx: float = 0.0,
+        vy: float = 0.0,
+        vz: float = 0.0,
+    ) -> tuple[Contact, str]:
+        """按精度融合地写自己的航迹（``"fused"`` / ``"replaced"``）。
+
+        本机量测的融合入口：同一平台的多台传感器、同一传感器的相邻两拍，
+        只要双方都带 σ，就按精度加权融合，而不是谁后写谁赢。
+        """
+        return self._store.merge_contact(
+            self._entity_id,
+            target_id,
+            quality=quality,
+            detected_at=detected_at,
+            bearing_deg=bearing_deg,
+            range_m=range_m,
+            x=x,
+            y=y,
+            z=z,
+            origin_id=ORIGIN_LOCAL,
+            hops=0,
+            phantom=phantom,
+            iff=iff,
+            sigma_pos_m=sigma_pos_m,
+            sigma_vel_mps=sigma_vel_mps,
+            vx=vx,
+            vy=vy,
+            vz=vz,
+        )
 
     def drop_contact(self, target_id: int) -> bool:
         return self._store.drop_contact(self._entity_id, target_id)

@@ -1106,6 +1106,32 @@ def test_direct_range_sigma_moves_the_range_but_not_the_bearing() -> None:
     assert contact.y == pytest.approx(truth[1], abs=1e-6)
 
 
+def test_error_model_feeds_precision_fusion() -> None:
+    """开误差模型 ⇒ σ 随量测上路，同目标再写时按精度**融合**（σ 收缩）。
+
+    融合的"签名"是 σ：覆盖更新不管写多少拍，σ 恒等于单次量测的
+    ``range_error_sigma``；只有真的在加权平均，σ 才会小于它。速度估计
+    来自相邻两拍**带噪量测**的差分——静止目标上它是噪声差分，恰恰
+    证明它不来自真值（上帝视角泄漏在这里没有入口）。
+    """
+    radar, engine, store = _build(
+        entities=[(1, 6, 0)], range_error_sigma=100.0, seed=11,
+        **_BUDGET, **_INSTANT_TRACK,
+    )
+    _run(engine, 2.0)
+    first = store.contacts_of(0)[0]
+    first_dt = first.detected_at
+    assert first.sigma_pos_m > 0.0                    # σ 随量测上路
+    assert (first.vx, first.vy, first.vz) == (0.0, 0.0, 0.0)   # 首拍无速度
+    _run(engine, 8.0)
+    fused = store.contacts_of(0)[0]
+    # ★ 航迹是**同一行被就地覆盖**的（状态口径），所以"首拍"要提前抄成标量，
+    #   拿对象引用等到的永远是最新一拍。
+    assert fused.detected_at > first_dt
+    assert (fused.vx, fused.vy, fused.vz) != (0.0, 0.0, 0.0)   # 差分出的速度
+    assert fused.sigma_pos_m < 100.0                  # ★ 融合发生：σ 收缩
+
+
 def test_two_error_paths_are_mutually_exclusive() -> None:
     """两条路同时给 ⇒ **当场报错**，不静默取一个。
 
@@ -1247,10 +1273,17 @@ _REPORT = {
     "origin_id": _PEER,
     "hops": 0,
     # ★ 线格式 v0.13.30 起多了 ``phantom``（`Contact.phantom`）、v0.13.33 起多了
-    # ``iff``（`Contact.iff`）。手写报文必须给全：`from_dict` 故意**不补默认值**
+    # ``iff``（`Contact.iff`）、v0.13.56 起多了精度与速度四件
+    # （``sigma_pos_m`` / ``sigma_vel_mps`` / ``vx`` / ``vy`` / ``vz``）。
+    # 手写报文必须给全：`from_dict` 故意**不补默认值**
     # ——补了的话少一个字段就静默变成"真目标"或"未识别"。
     "phantom": False,
     "iff": IFF_FOE,
+    "sigma_pos_m": 0.0,
+    "sigma_vel_mps": 0.0,
+    "vx": 0.0,
+    "vy": 0.0,
+    "vz": 0.0,
 }
 
 
