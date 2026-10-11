@@ -13,13 +13,17 @@
 
 - **离散事件引擎**：固定步长 + 事件队列 + 消息收件箱，支持批量并行推演（`services/orchestrator`）
 - **运载器**：空中 / 地面（轮式、履带）/ 水面 / 水下 / 导弹（弹道、巡航、反舰，带制导件）
-- **雷达探测**：雷达方程 → SNR → Pd（Swerling 起伏 + Marcum Q）、波束扫描相位制、地平线与通视判决、航迹管理（M/N 建航）
+- **雷达探测**：雷达方程 → SNR → Pd（Swerling 起伏 + Marcum Q）、波束扫描相位制、地平线与通视判决、航迹管理（M/N 建航）、按精度逆方差加权融合（σ 收缩）
 - **通信网**：多网络组网、链路判通（SNR 判据）、航迹报文分发、掉线与延迟
 - **电子战**：压制干扰（S/(N+J) 判据、极化失配）、干扰守门与被压标注
 - **决策**：规则决策器 + LLM 决策器（可接任意 OpenAI 兼容接口），任务编排（Task / Intent / Ledger）
+- **毁伤与武器**：战斗部命中判定（引信圈 + 最近点穿越插补、标称点数 / 装甲折扣）；武器组件（发射 / 装填、包线与阵营检查、运行期生成弹实体并交接目标）；补给组件（补弹补油）与机动油料模型
+- **实体命令层**：`sim.command(实体id, 指令, 参数)` 统一入口——指令下到实体、按挂载顺序分发到组件（`move / stop / fire / reload / resupply`）
+- **自主任务层**：任务管理器组件（双账本 + 四消息族走通信网 + 可靠重传 + 一对多指派），六类任务（attack / move / track / jam / comm / resupply）由挂载组件按声明认领执行，目标注销自动收尾
+- **人在回路**：WebSocket 双向通道——上行指令（`route / goto / stop / pace / fire / resupply / assign_task / cancel_task`）+ 逐条 ack 回执 + 可控实体清单，浏览器里点选实体实时操控
 - **地图**：经纬度与 H3 六边形双坐标系、战区网格、通视（LOS）、A* 寻路
 - **想定文本格式**：可读可写的声明式想定（`scenarios/*.txt`），配套 lint 校验与参数库（想定只写型号、参数进库）
-- **回放与可视化**：一键导出回放 JSON；`serve_replay.py` 起本地服务，浏览器里看实时推流 / 一键跑完 / 拖时间轴回放，卫星底图走本地瓦片（可选）
+- **回放与可视化**：一键导出回放 JSON；`serve_replay.py` 起本地服务，浏览器里看实时推流 / 一键跑完 / 拖时间轴回放 / 下发操控指令，卫星底图走本地瓦片（可选）
 
 ### 安装
 
@@ -49,7 +53,7 @@ python tools/export_replay.py scenarios/comm_track_jam.txt \
 python tools/serve_replay.py scenarios/comm_track_jam.txt \
     --port 8791 --seconds 480 --sample 20 --pace 2 --demo mover
 
-# 5) 跑测试（约 1300 条用例）
+# 5) 跑测试（约 1400 条用例）
 python -m pytest
 ```
 
@@ -90,7 +94,7 @@ end_platform
 milsim/
 ├── src/milsim/          # 框架源码
 │   ├── engine/          #   离散事件引擎（时间 / 事件 / 队列 / 收件箱）
-│   ├── models/          #   运载器 / 雷达 / 通信 / 干扰 / 制导 模型
+│   ├── models/          #   运载器 / 雷达 / 通信 / 干扰 / 制导 / 武器 / 毁伤 / 任务 模型
 │   ├── services/        #   想定解析 / 参数库 / 存储 / 通信 / 电子战 / 地图 / 编排
 │   ├── decision/        #   规则与 LLM 决策
 │   └── simulation.py    #   装配与仿真入口
@@ -136,13 +140,17 @@ python tools/serve_replay.py ...
 
 - **Discrete-event engine**: fixed time step + event queue + message inboxes; batch parallel runs via the orchestrator
 - **Movers**: air, ground (wheeled / tracked), surface, subsurface, and missiles (ballistic, cruise, anti-ship, with guidance components)
-- **Radar detection**: radar equation → SNR → Pd (Swerling fluctuations + Marcum Q), phase-based beam sweep, horizon and line-of-sight tests, track management (M/N criteria)
+- **Radar detection**: radar equation → SNR → Pd (Swerling fluctuations + Marcum Q), phase-based beam sweep, horizon and line-of-sight tests, track management (M/N criteria), accuracy-weighted track fusion (inverse-variance, σ shrinkage)
 - **Communication networks**: multi-net composition, link budget (SNR criterion), track-message dissemination, dropouts and latency
 - **Electronic warfare**: stand-in jamming with the S/(N+J) criterion and polarization mismatch, jam gating and suppressed-radar annotation
 - **Decision**: rule-based and LLM planners (any OpenAI-compatible endpoint), task orchestration (Task / Intent / Ledger)
+- **Damage & weapons**: warhead hit adjudication (fuse radius + closest-point crossing interpolation, nominal damage points / armor factor); weapon component (fire / reload, envelope and side checks, runtime missile spawning with target hand-off); supply component (ammo & fuel) and mover fuel model
+- **Entity command layer**: one entry point `sim.command(entity_id, cmd, args)` — commands go to the entity and dispatch to components by mount order (`move / stop / fire / reload / resupply`)
+- **Autonomous task layer**: task-manager component (dual ledgers + four message families over the comm network + reliable retransmission + one-to-many assignment); six task types (attack / move / track / jam / comm / resupply) claimed by mounted components via a declaration protocol, with auto-resolution when targets die
+- **Human-in-the-loop**: bidirectional WebSocket — uplink commands (`route / goto / stop / pace / fire / resupply / assign_task / cancel_task`), per-command acks, and a controllables list for live control from the browser
 - **Map**: lat/lng and H3 hex coordinates, zone grids, line-of-sight, A* pathfinding
 - **Scenario text format**: readable declarative scenarios (`scenarios/*.txt`) with a linter and a parameter library (scenarios reference model types; values live in the library)
-- **Replay & visualization**: one-command replay export; `serve_replay.py` serves a local web page supporting live streaming, run-to-completion, and timeline scrubbing, with an optional local satellite-tile basemap
+- **Replay & visualization**: one-command replay export; `serve_replay.py` serves a local web page supporting live streaming, run-to-completion, timeline scrubbing, and interactive uplink control, with an optional local satellite-tile basemap
 
 ### Installation
 
@@ -173,7 +181,7 @@ python tools/export_replay.py scenarios/comm_track_jam.txt \
 python tools/serve_replay.py scenarios/comm_track_jam.txt \
     --port 8791 --seconds 480 --sample 20 --pace 2 --demo mover
 
-# 5) Run the test suite (~1300 cases)
+# 5) Run the test suite (~1400 cases)
 python -m pytest
 ```
 
@@ -214,7 +222,7 @@ See [`scenarios/`](scenarios/) for more (patrol encounter, sensor→track→jamm
 milsim/
 ├── src/milsim/          # framework source
 │   ├── engine/          #   discrete-event engine (time / events / queue / inboxes)
-│   ├── models/          #   mover / radar / comm / jamming / guidance models
+│   ├── models/          #   mover / radar / comm / jamming / guidance / weapon / damage / task models
 │   ├── services/        #   scenario parsing / param library / store / comm / EW / maps / orchestrator
 │   ├── decision/        #   rule-based and LLM decision-making
 │   └── simulation.py    #   assembly and simulation entry point
