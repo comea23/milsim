@@ -71,14 +71,19 @@
 量纲，伤害直接写比例值（0.5 = 打掉一半）就能用；``mass_reference``
 缺省与默认装药相同 = 质量效应默认不修正（写 200 扣 200）。
 
-概率模型：骨架已定，系数留给大样本
-----------------------------------
-``hit_probability`` 是瑞利脱靶量骨架：脱靶量散布 σ 越小、杀伤半径越大，
-命中概率越高。σ 拆成两块——目标在剩余导引时间里能横移出去的距离
-（弹修正不掉的份额与弹/目标机动能力之比有关）加一个固有散布地板。
-**系数（``maneuver_factor``、``sigma_floor``）目前是给物理合理默认值的
-占位**，Phase 2 用 AFSIM 大样本统计标定（§5.17 的标定协议）。骨架的
-单调性现在就是对的：目标机动越强概率越低、弹越快（剩余时间越短）
+概率模型：两条通道（§5.17.5 / §5.17.10）
+----------------------------------------
+``p_model`` 二选一：
+
+- **analytic**（默认）：瑞利脱靶量骨架，见 :func:`hit_probability`——
+  σ 拆成目标横移份额加固有地板。系数（``maneuver_factor``、
+  ``sigma_floor``）是物理合理占位，Phase 2 的标定**没有**回头拟合
+  这两个系数——标定直接换掉了模型本身（下条）。
+- **table**：AFSIM 2.9 engage 大样本标定表（9720 格 × 30 seeds 的
+  truth 主表 + 108 格 × 6 干扰档系数批），见 :mod:`.prob_table` 与
+  设计文档 §5.17.10。查表纯函数、掷骰仍在这里（``Stream.ENGAGE``）。
+
+骨架的单调性现在就是对的：目标机动越强概率越低、弹越快（剩余时间越短）
 概率越高、弹机动能力越强概率越高。
 """
 
@@ -93,6 +98,11 @@ from ...services.params import Params
 from ...services.random import bernoulli
 from ...services.type_registry import register_component
 from ..component import Component
+from .prob_table import load_default
+
+#: 重力加速度（m/s²）——查表模型的 g 档换算（missile_accel/max_accel
+#: 是 m/s²，表轴是 g）。
+G0 = 9.80665
 
 #: 战斗部类型。Phase 1 只影响类型因子；Phase 2 里各类型会有自己的
 #: 毁伤分布（破片的空间衰减、侵彻的深度效应……）。
@@ -193,6 +203,21 @@ class Warhead(Component):
         #: 固有散布地板（米）：导引噪声、风、弹体离散——与目标机动无关
         #: 的那部分脱靶量尺度。默认 3 m，对 30 m 杀伤半径几乎是必中。
         "sigma_floor": Params.distance(3.0, minimum=0.0),
+        #: 概率模型（§5.17.10）：
+        #: - ``analytic``——瑞利骨架（§5.17.5，默认，旧行为逐字不变）；
+        #: - ``table``——AFSIM 大样本查表（truth 主表 × K_link × K_jam
+        #:   × K_rcs）。表轴是**仿真档位**，运行期按最近档映射（档间不
+        #:   插值，理由见 :mod:`.prob_table` 模块头）。判定几何映射：
+        #:   g_m = missile_accel/g，g_t = 目标 max_accel/g，v_m/v_t =
+        #:   判定时刻双方**实测速率**（位置差分，km/s），目标 RCS 读目标
+        #:   平台属性 ``rcs_m2``（缺省 1.0 = 标定基档）。首拍即进圈、
+        #:   速率不可知时用接近速率代理弹速、目标按静止（最低速档）；
+        #:   连接近速率都没有时回退解析骨架并在 verdict 注明——判定不能
+        #:   因为缺一拍历史而悬空。
+        "p_model": Params.string("analytic", choices=("analytic", "table")),
+        #: 干扰功率（W，仅 ``p_model="table"`` 使用）：K_jam 功率轴的
+        #: 查表输入（log 最近档；0 = 无干扰 → K_jam = 1）。
+        "jam_power": Params.number(0.0, minimum=0.0),
         #: 巡回周期（微秒）。它只是**采样**节拍，判定时刻的精度由插补
         #: 事件保证（见模块头），所以默认 1 s 足够。
         "check_interval": Params.duration(1_000_000, minimum=1),
@@ -219,6 +244,8 @@ class Warhead(Component):
         "_missile_accel",
         "_maneuver_factor",
         "_sigma_floor",
+        "_p_model",
+        "_jam_power",
         "_interval_s",
         "_judged",
         "_dead",
@@ -228,6 +255,8 @@ class Warhead(Component):
         "_prev_tgt",
         "_prev_t",
         "_last_closing",
+        "_last_my_speed",
+        "_last_tgt_speed",
     )
 
     # -- 生命周期 ----------------------------------------------------------
@@ -261,6 +290,8 @@ class Warhead(Component):
         self._missile_accel = float(self.spec["missile_accel"])
         self._maneuver_factor = float(self.spec["maneuver_factor"])
         self._sigma_floor = float(self.spec["sigma_floor"])
+        self._p_model = str(self.spec["p_model"])
+        self._jam_power = float(self.spec["jam_power"])
         self._interval_s = float(self.spec["check_interval"]) / 1_000_000.0
 
         self._judged = False
@@ -271,6 +302,8 @@ class Warhead(Component):
         self._prev_tgt: tuple[float, float, float] | None = None
         self._prev_t: int | None = None
         self._last_closing: float | None = None
+        self._last_my_speed: float | None = None
+        self._last_tgt_speed: float | None = None
 
         # 弹停飞检测的依据：同平台机动件的终止状态。terminated() 与
         # arrived() 两个名字都认（机动件族里两种叫法都在用），都没有就
@@ -307,6 +340,11 @@ class Warhead(Component):
             if dt > 0.0:
                 v_my = _velocity_of(my, self._prev_my, dt)
                 v_tgt = _velocity_of(tgt, self._prev_tgt, dt)
+                # 查表模型的双速率（§5.17.10）：表轴 v_m/v_t 是判定时刻
+                # 的双方速率（km/s）。差分噪声由"最近档映射"吸收——轴
+                # 间隔最小 0.4 km/s，帧间差分误差远小于它。
+                self._last_my_speed = _norm(v_my)
+                self._last_tgt_speed = _norm(v_tgt)
                 r = (tgt[0] - my[0], tgt[1] - my[1], tgt[2] - my[2])
                 rel = _sub(v_tgt, v_my)
                 self._last_closing = _closing_rate(r, rel)
@@ -354,15 +392,19 @@ class Warhead(Component):
         """一次性判定：掷骰 → 提交意图 → 结算 → 广播。"""
         self._judged = True
         a_t = float(self._target_param(self._target_id, "max_accel", 0.0))
-        p = hit_probability(
-            distance_m,
-            self._last_closing,
-            a_t,
-            self._missile_accel,
-            kill_radius=self._kill,
-            maneuver_factor=self._maneuver_factor,
-            sigma_floor=self._sigma_floor,
-        )
+        if self._p_model == "table":
+            p, note = self._table_probability(distance_m, a_t)
+        else:
+            p = hit_probability(
+                distance_m,
+                self._last_closing,
+                a_t,
+                self._missile_accel,
+                kill_radius=self._kill,
+                maneuver_factor=self._maneuver_factor,
+                sigma_floor=self._sigma_floor,
+            )
+            note = ""
         hit = bernoulli(self._rng, p)
         fraction = 0.0
         destroyed = False
@@ -378,6 +420,8 @@ class Warhead(Component):
             f"命中 P={p:.3f} 毁伤={fraction:.4f} 摧毁={destroyed}"
             if hit else f"失的 P={p:.3f} d={distance_m:.0f}m"
         )
+        if note:
+            self._verdict += f" [{note}]"
         if self._bus is not None:
             # engagement_resolved 协议：(攻击方, 目标, 命中?, 扣减比例, 摧毁?)
             self._bus.engagement_resolved.emit(
@@ -390,6 +434,43 @@ class Warhead(Component):
             # 没有起爆，保持飞行直到引信/弹道自然终止。
             self._store.remove(self.entity_id)
             self._registry.unregister(self.entity_id)
+
+    def _table_probability(self, distance_m: float, a_t: float) -> tuple[float, str]:
+        """查表概率（§5.17.10）：truth 主表 × K_link × K_jam。
+
+        判定几何到表轴的映射见 ``p_model`` 参数注。速率不可知的降级
+        链：弹速用接近速率代理 → 目标按静止（最低速档）→ 连接近速率
+        都没有（首拍无历史且无差分）整体回退解析骨架。返回
+        (概率, verdict 注记)。
+        """
+        table = load_default()
+        v_m = self._last_my_speed
+        if v_m is None:
+            # 首拍即进圈：弹朝目标飞，接近速率 ≈ 弹速（迎头主导）。
+            v_m = self._last_closing
+        if v_m is None:
+            # 连差分历史都没有：解析骨架兜底，判定不悬空。
+            p = hit_probability(
+                distance_m, None, a_t, self._missile_accel,
+                kill_radius=self._kill,
+                maneuver_factor=self._maneuver_factor,
+                sigma_floor=self._sigma_floor,
+            )
+            return p, "table→analytic(无历史)"
+        v_t = self._last_tgt_speed if self._last_tgt_speed is not None else 0.0
+        # 目标 RCS（m²）：读**目标**平台属性 ``rcs_m2``（缺省 1.0 =
+        # 标定基档）——RCS 是目标的属性，与 armor 同一读法。
+        rcs = float(self._target_param(self._target_id, "rcs_m2", 1.0))
+        p = table.combined(
+            self._missile_accel / G0,
+            max(v_m, 0.0) / 1000.0,
+            a_t / G0,
+            max(v_t, 0.0) / 1000.0,
+            self._kill,
+            self._jam_power,
+            rcs,
+        )
+        return p, "table"
 
     def _adjudicate(self, effect: Any) -> float:
         """结算一条毁伤意图（M4b 代行）：防护打折、从血条里扣、清队列。
@@ -462,6 +543,10 @@ def _sub(a: tuple[float, float, float], b: tuple[float, float, float]) -> tuple[
 def _distance(a: tuple[float, float, float], b: tuple[float, float, float]) -> float:
     d = _sub(a, b)
     return sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2])
+
+
+def _norm(v: tuple[float, float, float]) -> float:
+    return sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
 
 
 def _velocity_of(

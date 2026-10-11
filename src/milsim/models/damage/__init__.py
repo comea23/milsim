@@ -6,14 +6,17 @@
 from __future__ import annotations
 
 from .base import WARHEAD_FACTORS, WARHEAD_KINDS, Warhead, hit_probability
+from .prob_table import ProbTable, load_default
 
 #: 框架自带的战斗部参考实现。想定里 ``component damage WARHEAD`` 直接用。
 FRAMEWORK_DAMAGE: tuple[type, ...] = (Warhead,)
 
 __all__ = [
     "FRAMEWORK_DAMAGE",
+    "ProbTable",
     "WARHEAD_FACTORS",
     "WARHEAD_KINDS",
     "Warhead",
     "hit_probability",
+    "load_default",
 ]
