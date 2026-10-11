@@ -47,6 +47,33 @@
 互不污染——这是"两种用法一套实现"的落点：差别只有 pace 这个数，
 但会话必须分开（一个会话是**一次性**的，见 ``_handle_ws``）。
 
+★ 人在回路（v0.13.57）：上行指令通道
+----------------------------------
+WebSocket 从此**双向**：客户端可以发**文本帧**下达指令，服务端解析后经
+``engine.inbox`` 投给主线程执行。指令都是 JSON 对象：
+
+===================  ========================================================
+``{"cmd":"route",    给目标下达航线。``points`` 是 ``[[lat,lng,(alt)],...]"``
+ ``target":...,      （经纬度，服务端按目标所在战区换算成局部平面米；
+ ``points":[...]}``  ``alt`` 缺省用目标当前高度）。航路点 ≤ 64 个。
+``{"cmd":"goto",     单点机动（``route`` 的一个航路点版）：
+ ``target":...,      ``{"lat":..,"lng":..,"alt":..}``
+ ``lat":..,...}``
+``{"cmd":"stop",     清空目标的目的地与航线，就地悬停/停车。
+ ``target":...}``
+``{"cmd":"pace",     改本会话每拍等待秒数（0 = 尽快）。
+ ``value":0.5}``
+===================  ========================================================
+
+``target`` 是实体名（``"CAR_1"``）或实体编号。每条指令都回一条
+``{"type":"ack","cmd":...,"ok":...,"detail":...}`` 广播——**所有**订阅者
+都能看到"谁下了什么令、成没成"，这是人在回路里的回执语义。
+可控实体清单随 hello 的 ``controllables`` 字段下发（带运动件的非弹平台）；
+对弹下单会被拒——机动由制导件管（§5.8）。
+
+线程契约与 ``milsim.engine.inbox`` 一致：握手线程只解析与投递，
+仿真状态的一切读写都发生在主线程（inbox 闭包里）。
+
 ★ 线程模型
 ----------
 仿真跑在一个**单独的线程**里（不是每连接一个线程跑仿真）——一份想定推给
@@ -149,8 +176,8 @@ def ws_read_frame(sock: Any) -> tuple[int, bytes] | None:
 
     客户端帧**一定掩码**（RFC 6455 §5.1），所以要解掩码。这里只处理本工具
     用得到的：``close`` / ``ping`` / ``pong`` / ``text``；控制帧的 payload
-    一律 ≤125 字节。不做分片重组——本工具的服务端**只发不收**，收只是为了
-    知道"对端关了"和"还活着"。
+    一律 ≤125 字节。不做分片重组——上行只有短 JSON 指令（v0.13.57 起文本帧
+    是人在回路指令，见模块头），远够用；收帧的首要目的仍是知道"对端关了"。
     """
     head = _recv_exact(sock, 2)
     if head is None:
@@ -194,6 +221,170 @@ def _recv_exact(sock: Any, n: int) -> bytes | None:
 # ===========================================================================
 # 2. 推流会话：一份想定、一个线程、一组订阅者
 # ===========================================================================
+
+# ===========================================================================
+# 2. 人在回路：上行指令的解析与执行（v0.13.57）
+# ===========================================================================
+
+#: 一条上行航线允许的最大航路点数。人在地图上点不出更多；上限挡的是
+#: 误把整条航迹当指令发上来的客户端。
+MAX_UPLINK_POINTS = 64
+
+#: 上行指令字面量集合（``pace`` 单独处理——它动的是会话，不是仿真）。
+_UPLINK_CMDS = ("route", "goto", "stop")
+
+
+def _ack(cmd: str, ok: bool, detail: str) -> str:
+    """打包一条 ack 广播文本。ack 是**给所有人看的**：谁下了令、成没成。"""
+    return json.dumps({"type": "ack", "cmd": cmd, "ok": ok, "detail": detail},
+                      ensure_ascii=False, separators=(",", ":"))
+
+
+def parse_uplink(text: str) -> tuple[str, dict[str, Any], str]:
+    """解析一条上行指令文本帧。返回 ``(cmd, data, error)``。
+
+    成功时 ``error == ""``；失败时 ``cmd == ""``、``error`` 是给人看的中文
+    原因。**只做语法与数值校验**，不碰仿真状态——语义（目标是谁、坐标落在
+    哪个战区、路走不走得通）留给 :func:`execute_uplink` 在主线程里裁决。
+
+    为什么语法校验放握手线程、语义放主线程：语法错了立刻回 ack，坏客户端
+    得不到"发出去就没音讯"的体验；而语义查询（``registry`` / ``maps``）
+    与主线程同时在读，握手线程去读虽然多半没事，但那是在赌时序——按
+    inbox 的铁律办：握手线程只出解析结果，别的全投给主线程。
+    """
+    try:
+        data = json.loads(text)
+    except ValueError as exc:
+        return "", {}, f"不是合法 JSON：{exc}"
+    if not isinstance(data, dict):
+        return "", {}, "指令必须是 JSON 对象"
+
+    cmd = str(data.get("cmd") or "")
+
+    if cmd == "pace":
+        try:
+            value = float(data.get("value"))  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return "", {}, "pace 需要 value（数字，秒/拍，0=尽快）"
+        if not (0.0 <= value <= 10.0):
+            return "", {}, "pace 超出范围 [0, 10]"
+        data["value"] = value
+        return cmd, data, ""
+
+    if cmd not in _UPLINK_CMDS:
+        return "", {}, f"未知指令 {cmd!r}（可用：{' / '.join(_UPLINK_CMDS)} / pace）"
+
+    target = data.get("target")
+    if isinstance(target, bool) or not isinstance(target, (str, int)):
+        return "", {}, "target 必须是实体名或实体编号"
+    if cmd == "stop":
+        return cmd, data, ""
+
+    if cmd == "goto":
+        raw = [[data.get("lat"), data.get("lng"), data.get("alt")]]
+    else:
+        raw = data.get("points")
+    if not isinstance(raw, list) or not raw:
+        return "", {}, (
+            "route 需要 points（[[lat,lng,(alt)], ...]）"
+            if cmd == "route" else "goto 需要 lat / lng（可带 alt）"
+        )
+    if len(raw) > MAX_UPLINK_POINTS:
+        return "", {}, f"航路点超过上限 {MAX_UPLINK_POINTS}"
+
+    clean: list[list[float]] = []
+    for p in raw:
+        if isinstance(p, (str, int, float)) or not isinstance(p, (list, tuple)) \
+                or len(p) not in (2, 3):
+            return "", {}, "每个航路点应是 [lat, lng] 或 [lat, lng, alt]"
+        try:
+            vals = [float(x) for x in p]
+        except (TypeError, ValueError):
+            return "", {}, "航路点坐标必须是数字"
+        lat, lng = vals[0], vals[1]
+        if not (-90.0 <= lat <= 90.0 and -180.0 <= lng <= 180.0):
+            return "", {}, f"经纬度越界：({lat}, {lng})"
+        clean.append(vals)
+    data["points"] = clean
+    return cmd, data, ""
+
+
+def execute_uplink(sim: Simulation, data: dict[str, Any]) -> tuple[bool, str]:
+    """执行一条**已解析**的上行指令。**只能由主线程调用**（inbox 闭包里）。
+
+    返回 ``(ok, detail)``，detail 是给人看的执行结果；ack 的打包与广播由
+    调用方（:meth:`StreamSession.apply_command`）负责。任何失败都**不抛异常**
+    ——一条坏指令不该炸掉整场推演，这是人与 ``DecisionProvider`` 同样的
+    降级纪律：可恢复的错误降级成一句说明。
+
+    机动指令一律走 :meth:`~milsim.models.mover.base.Mover.move_along_route`
+    （含单点）：它与 :meth:`~...move_to_point` 的差别在速率剖面——单点反复
+    下达时逐点 ``move_to_point`` 会让每个航路点都刹一次车（详见该方法
+    docstring 的"两个航路点都当最后一腿"），人在回路上连续点几个点，
+    走的是"整条航线"语义才对。
+    """
+    cmd = data["cmd"]
+    ref = data.get("target")
+
+    entity_id: int | None = None
+    entity: Any = None
+    if isinstance(ref, int):
+        entity_id = ref if ref in sim.entities else None
+        entity = sim.entities.get(ref)
+    else:
+        entry = sim.registry.by_name(str(ref))
+        if entry is not None:
+            entity_id = entry.entity_id
+            entity = sim.entities.get(entity_id)
+    if entity is None or entity_id is None:
+        return False, f"找不到目标 {ref!r}"
+
+    mover = entity.component("mover")
+    if mover is None:
+        return False, f"{entity.name} 没有运动件，不能机动"
+    spec = getattr(mover, "spec", None)
+    if spec is not None and spec.get("launch_speed") is not None:
+        return False, f"{entity.name} 是弹，机动由制导件管（§5.8），不接人工指令"
+
+    if cmd == "stop":
+        mover.stop()
+        return True, f"{entity.name} 已停止（清空目的地与航线）"
+
+    # route / goto：经纬度 → 局部平面米。落在哪个战区就按哪个战区的投影换算。
+    # ★ goto 在这里归一化成单点 route——本函数要**自足**：不经 parse_uplink
+    #   直接调用（测试、未来的其他入口）给原始 goto 形态也要能执行。
+    if cmd == "goto" and "points" not in data:
+        data["points"] = [[data.get("lat"), data.get("lng"), data.get("alt")]]
+    pts: list[list[float]] = data["points"]
+    zone = None
+    for z in sim.maps.active_zones:
+        if z.contains(pts[0][0], pts[0][1]):
+            zone = z
+            break
+    if zone is None:
+        if len(sim.maps.active_zones) == 1:
+            # 唯一战区：容错收下。投影会把战区外的点拉到战区边缘附近，
+            # 走不走得到由通行门槛说话——比直接拒绝对人友好。
+            zone = sim.maps.active_zones[0]
+        else:
+            return False, f"坐标 ({pts[0][0]}, {pts[0][1]}) 不在任何战区内"
+
+    route: list[tuple[float, float, float]] = []
+    for p in pts:
+        x, y = zone.frame.geo_to_world(p[0], p[1])
+        alt = p[2] if len(p) == 3 else None
+        if alt is None:
+            pose = sim.store.pose_of(entity_id)
+            alt = pose[2] if pose is not None else 0.0
+        route.append((x, y, float(alt)))
+
+    ok = mover.move_along_route(route)
+    tail = "" if ok else f"（{mover.blocked_reason()}）"
+    return ok, (
+        f"{entity.name} 已受令：{'单点机动' if len(route) == 1 else f'{len(route)} 点航线'}"
+        f" → ({route[-1][0]:.0f}, {route[-1][1]:.0f}) @ {route[-1][2]:.0f} m{tail}"
+    )
+
 
 class StreamSession:
     """跑一份想定并把每帧广播给订阅者。
@@ -239,6 +430,9 @@ class StreamSession:
         self.done = False
         self.error: str | None = None
         self.log: list[str] = []
+        #: 装配好的仿真（``_run`` 里就位）。上行指令的投递目标。
+        #: **握手线程只许把它传进 inbox 闭包**，不许解引用读状态。
+        self._sim: Simulation | None = None
 
     # -- 订阅管理 ----------------------------------------------------------
     def attach(self, sock: Any) -> None:
@@ -273,6 +467,56 @@ class StreamSession:
         with self._lock:
             if sock in self._subs:
                 self._subs.remove(sock)
+
+    # -- 人在回路：上行指令（v0.13.57） ------------------------------------
+    def _controllables(self, sim: Simulation) -> list[dict[str, Any]]:
+        """可控实体清单（随 hello 下发）：带运动件、且不是弹的平台。
+
+        弹被排除的口径与 :func:`execute_uplink` 一致——机动由制导件管（§5.8），
+        给弹下"飞去哪"的令本来就不是人该干的事。
+        """
+        out: list[dict[str, Any]] = []
+        for sid in sorted(sim.entities):
+            entity = sim.entities[sid]
+            mover = entity.component("mover")
+            if mover is None:
+                continue
+            spec = getattr(mover, "spec", None)
+            if spec is not None and spec.get("launch_speed") is not None:
+                continue
+            out.append({"id": sid, "name": entity.name})
+        return out
+
+    def apply_command(self, text: str) -> None:
+        """处理一条上行指令（握手线程调用）。任何分支都不抛异常。
+
+        线程契约：这里**只解析与投递**——pace 直接改（它本来就线程安全），
+        其余指令把 :func:`execute_uplink` 打包成闭包投进 ``engine.inbox``，
+        由主线程在下一步开头执行并广播 ack。会话已结束（``done``）或仿真
+        还没装配好时拒收——拒收也要回 ack，不回的话页面上的"已下令"就是
+        一个没人反驳的谎言。
+        """
+        cmd, data, err = parse_uplink(text)
+        if err:
+            self._broadcast(_ack(cmd, False, err))
+            return
+
+        if cmd == "pace":
+            self.set_pace(float(data["value"]))
+            self._broadcast(_ack(
+                cmd, True, f"节拍已改为 {data['value']:g} 秒/拍"))
+            return
+
+        sim = self._sim
+        if sim is None or self.done:
+            self._broadcast(_ack(cmd, False, "会话未就绪或已结束，指令被拒"))
+            return
+
+        def job() -> None:
+            ok, detail = execute_uplink(sim, data)
+            self._broadcast(_ack(cmd, ok, detail))
+
+        sim.engine.inbox.post(job)
 
     def set_pace(self, pace: float) -> None:
         """改每拍之间的等待秒数（0 = 尽快）。线程安全。
@@ -360,6 +604,10 @@ class StreamSession:
             for line in _issue_mover_commands(sim):
                 self.log.append(line)
 
+        # 上行指令通道（人在回路）：从这一刻起握手线程可以投递指令了。
+        # 放在 initialize 之后——装配半途的 sim 不该被外部指令碰到。
+        self._sim = sim
+
         zone_frames = replay_mod.zone_frames_of(sim)
         step_us = replay_mod.default_step_us(sim, self.sample)
 
@@ -380,6 +628,7 @@ class StreamSession:
             "legend": replay_mod.legend(),
             "live": True,
             "log": list(self.log),
+            "controllables": self._controllables(sim),
         }
         # ★ hello 不在这里广播：由 ``attach()`` 发给每个新订阅者（见那里的注释）。
         #   这样"晚连进来的人"也一定拿到静态部分，且不会重复收两次。
@@ -1185,9 +1434,16 @@ def make_handler(root: Path, session_factory: Any,
                     got = ws_read_frame(sock)
                     if got is None:
                         break
-                    opcode, _payload = got
+                    opcode, payload = got
                     if opcode == 0x8:  # close
                         break
+                    if opcode == 0x1:  # text：上行指令（人在回路，v0.13.57）
+                        try:
+                            session.apply_command(
+                                payload.decode("utf-8", "replace"))
+                        except Exception as exc:  # pragma: no cover - 兜底
+                            sys.stderr.write(f"[ws] 指令处理异常：{exc}\n")
+                        continue
                     if opcode == 0x9:  # ping → pong（保持连接）
                         try:
                             sock.sendall(bytes([0x8A, 0]))

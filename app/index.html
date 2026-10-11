@@ -70,6 +70,7 @@
   #info .t:first-child { margin-top: 0; }
   .kpi { display: flex; justify-content: space-between; padding: 3px 6px;
     background: var(--panel2); border-radius: 4px; margin-bottom: 3px; }
+  .kpi.sel { outline: 1px solid var(--amber); background: #30363d; }
   .kpi b { font-weight: 600; font-variant-numeric: tabular-nums; }
   ul.list { list-style: none; margin: 0; padding: 0; }
   ul.list li { display: flex; justify-content: space-between; gap: 6px;
@@ -159,6 +160,17 @@
       <div class="t">实体</div>
       <div id="entlist"></div>
     </div>
+    <div class="grp" id="cmdbar" style="display:none">
+      <div class="t">人在回路</div>
+      <label class="chk"><input type="checkbox" id="orderMode">
+        <span>指令模式（点地图 = 单点机动）</span></label>
+      <div style="display:flex;gap:6px;align-items:center;margin-top:4px">
+        <span class="muted" style="font-size:11px">选中：</span>
+        <span id="selName" class="muted" style="font-size:11px">（点实体列表选择）</span>
+        <button class="btn" id="cmdStop" style="margin-left:auto" disabled>停止</button>
+      </div>
+      <div class="hint" id="cmdHint" style="margin-top:4px"></div>
+    </div>
     <div class="hint" id="srchint"></div>
   </aside>
 
@@ -246,6 +258,10 @@ const S = {
   liveFast: false,   // 实时里的哪一档：true = 一键跑完，false = 边跑边看
   liveFollow: true,  // 是否自动跟到最新帧（用户往回拖过就停）
   liveDone: false,   // 服务端是否已推完
+  // -- 人在回路（v0.13.57） --
+  controllables: [], // hello 下发的可控实体 [{id, name}]（带运动件的非弹平台）
+  selEid: null,      // 当前选中的可控实体 id
+  orderMode: false,  // 指令模式开关：开着时点地图 = 下达单点机动
 };
 
 // ---- 展示常量 ------------------------------------------------------------
@@ -547,6 +563,13 @@ function startLive(scenarioPath, mode) {
       };
       S.frames = S.data.frames;
       S.frame = 0;
+      // 人在回路：记录可控清单并点亮指令面板（离线回放没有这个字段）
+      S.controllables = msg.controllables || [];
+      S.selEid = null;
+      S.orderMode = false;
+      $('orderMode').checked = false;
+      $('cmdbar').style.display = S.controllables.length ? '' : 'none';
+      updateCmdSel();
       buildEntityList();
       buildStaticLayers();
       renderLegend();
@@ -571,6 +594,12 @@ function startLive(scenarioPath, mode) {
       } else {
         $('fno').textContent = (S.frame + 1) + '/' + S.frames.length;
       }
+      return;
+    }
+
+    if (msg.type === 'ack') {
+      // 上行指令的回执：谁下了什么令、成没成（所有订阅者都收得到）。
+      showNote((msg.ok ? '✔ ' : '✘ ') + msg.detail, !msg.ok);
       return;
     }
 
@@ -621,6 +650,13 @@ function closeLive() {
   S.liveFast = false;
   S.liveFollow = true;
   S.liveDone = false;
+  // 切回离线文件 ⇒ 人在回路面板跟着熄灭（离线没有上行通道）
+  S.controllables = [];
+  S.selEid = null;
+  S.orderMode = false;
+  const om = $('orderMode');
+  if (om) om.checked = false;
+  $('cmdbar').style.display = 'none';
   for (const id of ['livedot_f', 'livedot_l']) {
     const dot = $(id);
     if (dot) { dot.textContent = '（需服务端）'; dot.style.color = ''; }
@@ -698,6 +734,23 @@ function initMap() {
   //   ``'transparent'`` 会被拒（console 报"color格式不正确"）。
   map.setBackgroundColor('rgba(0,0,0,0)');
   hideSdkBranding();
+  // ---- 人在回路：指令模式下点地图 = 给选中实体下单（v0.13.57） ----
+  // TMap 的 click 事件给 evt.latLng；SDK 事件名各版本一致（click 是最老的
+  // 基础事件），不必像视图事件那样多押几个名字。
+  if (typeof map.on === 'function') {
+    map.on('click', (evt) => {
+      if (!S.orderMode || !S.live) return;
+      if (S.selEid == null || !controllableIds().has(S.selEid)) {
+        showNote('先在实体列表里选一个可控实体', true);
+        return;
+      }
+      const ll = evt.latLng;
+      if (!ll) return;
+      const lat = typeof ll.getLat === 'function' ? ll.getLat() : ll.lat;
+      const lng = typeof ll.getLng === 'function' ? ll.getLng() : ll.lng;
+      sendCmd({ cmd: 'goto', target: S.selEid, lat: lat, lng: lng });
+    });
+  }
   // ★ 卫星影像：AFSIM 自带的 NASA Blue Marble NG 本地 mbtiles
   //   （``resources/maps/bluemarble_db/bmng.mbtiles``，公有领域），
   //   由 tools/serve_replay.py 的 ``/tiles`` 逐块重投影成 **Web 墨卡托**
@@ -1382,11 +1435,46 @@ function buildEntityList() {
   for (const el of $('entlist').querySelectorAll('[data-eid]')) {
     el.onclick = () => {
       const eid = Number(el.dataset.eid);
+      selectEntity(eid);
       const f = S.frames[S.frame];
       const e = (f.entities || []).find(x => x.entity_id === eid);
       if (e && e.lat != null) map.setCenter(new TMap.LatLng(e.lat, e.lng));
     };
   }
+}
+
+// ---- 人在回路：选择与下单（v0.13.57） --------------------------------------
+// 服务端随 hello 下发可控清单（controllables：带运动件、非弹）。
+// 交互三件套：实体列表选中 → 勾"指令模式" → 点地图下单（单点机动）。
+// 指令经 WebSocket 上行，服务端解析后投 engine.inbox 由主线程执行，
+// 回执以 {"type":"ack"} 广播——所有人都能看到谁下了什么令。
+function controllableIds() { return new Set(S.controllables.map(c => c.id)); }
+
+function selectEntity(eid) {
+  S.selEid = eid;
+  for (const el of $('entlist').querySelectorAll('[data-eid]')) {
+    el.classList.toggle('sel', Number(el.dataset.eid) === eid);
+  }
+  updateCmdSel();
+  const c = S.controllables.find(x => x.id === eid);
+  if (!c) {
+    const e = S.data.entities[eid];
+    showNote((e ? e.name : eid) + ' 没有运动件（或它是弹），不能接机动指令', true);
+  }
+}
+
+function updateCmdSel() {
+  const c = S.controllables.find(x => x.id === S.selEid);
+  $('selName').textContent = c ? c.name : '（点实体列表选择）';
+  $('cmdStop').disabled = !c;
+}
+
+function sendCmd(obj) {
+  if (!S.ws || S.ws.readyState !== 1) {
+    showNote('未连接实时推流，指令无处可去', true);
+    return;
+  }
+  S.ws.send(JSON.stringify(obj));
 }
 
 // ===========================================================================
@@ -1460,6 +1548,25 @@ function bindControls() {
     else if (ev.key === 'ArrowLeft') { setPlaying(false); stepTo(S.frame - 1); }
     else if (ev.key === 'ArrowRight') { setPlaying(false); stepTo(S.frame + 1); }
   });
+  // ---- 人在回路（v0.13.57） ----
+  $('orderMode').onchange = (e) => {
+    S.orderMode = e.target.checked;
+    if (S.orderMode) {
+      if (!S.controllables.length) {
+        e.target.checked = false; S.orderMode = false;
+        showNote('本场没有可控实体（实时推流才有）', true);
+      } else if (S.selEid == null || !controllableIds().has(S.selEid)) {
+        showNote('先在实体列表里选一个可控实体');
+      } else {
+        showNote('指令模式：点地图给 ' +
+          (S.controllables.find(x => x.id === S.selEid) || {}).name + ' 下单');
+      }
+    }
+  };
+  $('cmdStop').onclick = () => {
+    if (S.selEid == null) return;
+    sendCmd({ cmd: 'stop', target: S.selEid });
+  };
 }
 
 //: 单步/回退。实时模式下往回看是允许的（帧已经在本地了），
