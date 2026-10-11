@@ -234,9 +234,25 @@ class Mover(Component):
         #: 的这个参数设成正数等于封死自己——那是使用者写错了，不是框架的
         #: 问题。
         "min_water_depth": Params.distance(0.0, minimum=0.0),
+        #: **油箱容量（kg，0 = 没有油模型）**。开了它（>0），油烧空 = 走不动
+        #: （推进一步都不挪，速度归零）；补给靠 ``SUPPLY`` 组件的 ``resupply``
+        #: 指令（§5.18）。默认 0：历史想定没有油模型，一行不改逐字兼容——
+        #: 锚点（patrol 63/120）不能被"油耗"这种与感知无关的事扰动。
+        "fuel_capacity": Params.mass(0.0, minimum=0.0),
+        #: **油耗（kg/km）**——按**走过的水平里程**烧，与速度无关：同一段路
+        #: 走快走慢烧一样多（车辆/舰船的口径；飞机按时间烧是另一种模型，
+        #: 需要时在子类覆盖 :meth:`_burn_fuel`）。``fuel_capacity 0`` 时不参与。
+        "fuel_rate": Params.mass(0.0, minimum=0.0),
     }
 
     SLOT_HINT = "mover"
+
+    #: 运行期指令（§5.18）。机动件有两个实体级指令：``move``（沿航路点走，
+    #: 坐标是**局部平面米**——经纬度换算属于任务层/上行通道）与 ``stop``。
+    COMMANDS = {
+        "move": "机动：args = {'points': [[x, y, (z)], ...]}（局部平面米）",
+        "stop": "就地停车",
+    }
 
     #: 运载器画像名（:mod:`milsim.services.map.nav` 里的键）。
     #: ``None`` = 不吃地形：对空中单位是对的，天空没有"通行代价"这回事，
@@ -267,6 +283,8 @@ class Mover(Component):
         "_speed",
         "_climb",
         "_turn",
+        "_fuel_cap",
+        "_fuel_kg",
     )
 
     # -- 生命周期 ----------------------------------------------------------
@@ -303,6 +321,9 @@ class Mover(Component):
         self._started_us: int | None = None
         self._finished_us: int | None = None
         self._last_tick_us: int | None = None
+        #: 油箱（v0.13.58）。容量 0 = 没有油模型（历史想定逐字兼容）。
+        self._fuel_cap = float(self.spec["fuel_capacity"])
+        self._fuel_kg = self._fuel_cap          # 出厂满油
         mount.every(self.spec["period"], self._on_tick, PRIORITY_MOVER)
 
     # -- 下达目的地（运行期） ----------------------------------------------
@@ -387,6 +408,34 @@ class Mover(Component):
         self._started_us = None
         self._finished_us = None
         self._last_tick_us = None
+
+    # -- 运行期指令（§5.18） ------------------------------------------------
+
+    def execute(self, cmd: str, args: dict) -> tuple[bool, str]:
+        ok, why = super().execute(cmd, args)
+        if not ok and cmd not in self.COMMANDS:
+            return ok, why                  # 真不认识——按基类的说法拒绝
+        if cmd == "stop":
+            self.stop()
+            return True, "停车"
+        if cmd == "move":
+            points = args.get("points")
+            if not isinstance(points, list) or not points:
+                return False, "move 需要 points（[[x, y, (z)], ...]，局部平面米）"
+            try:
+                route = [
+                    (
+                        float(p[0]), float(p[1]),
+                        float(p[2]) if len(p) > 2 else 0.0,
+                    )
+                    for p in points
+                ]
+            except (TypeError, ValueError, IndexError):
+                return False, "points 里的点必须是 [x, y, (z)] 数字三元组"
+            if not self.move_along_route(route):
+                return False, "路线规划不出（走不通或没有地图）"
+            return True, f"机动 {len(route)} 个航路点"
+        return False, f"指令 {cmd!r} 没有实现"
 
     # -- 查询 --------------------------------------------------------------
 
@@ -544,6 +593,38 @@ class Mover(Component):
             self.update(engine.now)
         return EventResult.RESCHEDULE
 
+    # -- 油料（v0.13.58，§5.18） --------------------------------------------
+
+    def fuel_kg(self) -> float:
+        """剩油（kg）。``fuel_capacity 0``（无油模型）恒返回 0。"""
+        return self._fuel_kg
+
+    def fuel_capacity_kg(self) -> float:
+        return self._fuel_cap
+
+    def add_fuel(self, kg: float) -> float:
+        """加油，返回**实际加进去的量**（油箱满则溢出部分不收）。"""
+        if self._fuel_cap <= 0.0:
+            return 0.0                      # 没有油模型的平台加不进油
+        before = self._fuel_kg
+        self._fuel_kg = min(self._fuel_cap, self._fuel_kg + float(kg))
+        return self._fuel_kg - before
+
+    def _burn_fuel(self, distance_m: float) -> None:
+        """按水平里程烧油。烧空 clamp 到 0——负油量是荒谬的。
+
+        飞机按时间烧是另一种口径，需要时在子类覆盖本方法（签名不变）。
+        """
+        if self._fuel_cap <= 0.0:
+            return
+        rate = float(self.spec["fuel_rate"])
+        if rate <= 0.0:
+            return
+        self._fuel_kg = max(0.0, self._fuel_kg - rate * distance_m / 1000.0)
+
+    def _out_of_fuel(self) -> bool:
+        return self._fuel_cap > 0.0 and self._fuel_kg <= 0.0
+
     def update(self, ctx: Any = None) -> None:
         """推进一步。子类一般覆盖 :meth:`_advance` 而不是本方法。
 
@@ -565,10 +646,19 @@ class Mover(Component):
         if self._started_us is None:
             self._started_us = now
             return
+        if self._out_of_fuel():
+            # 油烧空：目的地还在，但一步都挪不动。不报错、不清目的地——
+            # 补上油（SUPPLY 的 resupply）下一拍接着走。
+            self._halt(now)
+            return
         pose = self.view.my_pose()
         if pose is None:
             return
         self._advance(float(self.spec["period"]) / 1_000_000.0, pose)
+        if self._fuel_cap > 0.0:
+            moved = self.view.my_pose()
+            if moved is not None:
+                self._burn_fuel(hypot(moved[0] - pose[0], moved[1] - pose[1]))
         if self.arrived():
             # 到的那一刻就把速度清零，不要留到下一帧。留一帧的话，在
             # [到达, 下一帧) 这段区间里位置写着"已到"而速度写着"在跑"，

@@ -165,6 +165,17 @@ class GuidanceComputer(Component):
         """直接指定打击点（世界坐标）。用于没有目标实体、或打"某个坐标"的场合。"""
         self._point = (float(x), float(y), float(z))
 
+    def assign_target_id(self, entity_id: int) -> None:
+        """运行期指定**目标实体**（v0.13.58，§5.18）。
+
+        发射组件生成弹实体后立刻调它——动态出生的弹不可能在想定里预写
+        ``target_name``，它要打谁由发射那一刻决定。目标存在性**不在这里查**：
+        弹飞出去后 ``target_point()`` 会返回 None（实体已注销），制导件
+        自己有"目标消失"的处置；发射组件在 fire 时已经验过目标活着。
+        """
+        self._target_id = int(entity_id)
+        self._point = None
+
     def target_point(self) -> tuple[float, float, float] | None:
         """目标当前所在。**取的是真值**。
 

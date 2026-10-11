@@ -90,6 +90,8 @@ from .percep import (
     TrackManager,
 )
 from .unit_state import UnitState
+from .supply import FRAMEWORK_SUPPLY, Supply
+from .weapon import FRAMEWORK_WEAPONS, WEAPON_CLASSES, Weapon
 
 #: 框架自带的**参考实现**（组件）。想定里可以直接写这些名字，不需要
 #: 额外声明。
@@ -110,6 +112,8 @@ FRAMEWORK_COMPONENTS: tuple[type, ...] = (
     *FRAMEWORK_JAMMERS,
     *FRAMEWORK_COMMS,
     *FRAMEWORK_DAMAGE,
+    *FRAMEWORK_WEAPONS,
+    *FRAMEWORK_SUPPLY,
 )
 
 #: 框架自带的平台类。``PLATFORM`` 是所有平台类型的隐式根。
@@ -140,6 +144,12 @@ __all__ = [
     "Component",
     "Entity",
     "MountContext",
+    # -- 发射与补给（§5.18）--
+    "FRAMEWORK_SUPPLY",
+    "FRAMEWORK_WEAPONS",
+    "Supply",
+    "WEAPON_CLASSES",
+    "Weapon",
     # -- 框架自带实现的清单 --
     "FRAMEWORK_COMPONENTS",
     "FRAMEWORK_PLATFORMS",

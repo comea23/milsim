@@ -231,7 +231,7 @@ def _recv_exact(sock: Any, n: int) -> bytes | None:
 MAX_UPLINK_POINTS = 64
 
 #: 上行指令字面量集合（``pace`` 单独处理——它动的是会话，不是仿真）。
-_UPLINK_CMDS = ("route", "goto", "stop")
+_UPLINK_CMDS = ("route", "goto", "stop", "fire", "resupply")
 
 
 def _ack(cmd: str, ok: bool, detail: str) -> str:
@@ -278,6 +278,16 @@ def parse_uplink(text: str) -> tuple[str, dict[str, Any], str]:
     if isinstance(target, bool) or not isinstance(target, (str, int)):
         return "", {}, "target 必须是实体名或实体编号"
     if cmd == "stop":
+        return cmd, data, ""
+
+    # fire / resupply：**双实体指令**——target 是发射方/补给方，第二实体
+    # 分别叫 victim / supply_to。语法校验只查"给了没有、是不是名字或编号"，
+    # 存在性与语义（包线、阵营、库存、距离）全留给实体上的组件在主线程判。
+    if cmd in ("fire", "resupply"):
+        field = "victim" if cmd == "fire" else "supply_to"
+        second = data.get(field)
+        if isinstance(second, bool) or not isinstance(second, (str, int)):
+            return "", {}, f"{cmd} 需要 {field}（实体名或编号）"
         return cmd, data, ""
 
     if cmd == "goto":
@@ -338,6 +348,13 @@ def execute_uplink(sim: Simulation, data: dict[str, Any]) -> tuple[bool, str]:
             entity = sim.entities.get(entity_id)
     if entity is None or entity_id is None:
         return False, f"找不到目标 {ref!r}"
+
+    # fire / resupply：走实体命令层（§5.18）——组件自己验包线/阵营/库存/
+    # 补给半径，这里只做转发与回执。
+    if cmd in ("fire", "resupply"):
+        field = "victim" if cmd == "fire" else "supply_to"
+        ok, why = sim.command(entity_id, cmd, {field: data.get(field)})
+        return ok, f"{entity.name} {cmd}：{why}"
 
     mover = entity.component("mover")
     if mover is None:

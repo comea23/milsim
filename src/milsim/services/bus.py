@@ -172,6 +172,7 @@ class EventBus:
         "track_dropped",
         "message_delivered",
         "engagement_resolved",
+        "weapon_fired",
         "decision_issued",
         "task_changed",
         "mover_blocked",
@@ -187,6 +188,8 @@ class EventBus:
         self.track_dropped: Signal = Signal("track_dropped")
         self.message_delivered: Signal = Signal("message_delivered")
         self.engagement_resolved: Signal = Signal("engagement_resolved")
+        #: 武器发射（v0.13.58，§5.18）：``emit(发射方id, 弹实体id, 目标id, 武器类别)``。
+        self.weapon_fired: Signal = Signal("weapon_fired")
         #: 决策可追溯：每一次决策都应能回放"当时问了什么、答了什么"
         self.decision_issued: Signal = Signal("decision_issued")
         self.task_changed: Signal = Signal("task_changed")

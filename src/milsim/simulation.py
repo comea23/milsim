@@ -855,7 +855,87 @@ class Simulation:
             jam=self.jam,
             comm=self.comm,
             platform_params=self.platform_params.get(entity_id, {}),
+            spawn=self.spawn_platform,
         )
+
+    # -- 运行期指令与生成（v0.13.58，§5.18） --------------------------------
+
+    def command(
+        self, entity_id: int, cmd: str, args: dict | None = None
+    ) -> tuple[bool, str]:
+        """对**实体**下达一条运行期指令（§5.18 的总入口）。
+
+        调用形态就是用户口径：``sim.command(实体id, 指令, 参数)``——
+        指令下到实体，实体自己找接令的部件。**必须在主线程调**（外部
+        线程一律走 ``engine.inbox`` 投闭包）。
+        """
+        entity = self.entities.get(entity_id)
+        if entity is None:
+            found = self.registry.get(entity_id)
+            if found is None:
+                return False, f"实体 {entity_id} 不存在"
+            entity = found
+        return entity.command(cmd, args or {})
+
+    def spawn_platform(
+        self,
+        type_name: str,
+        *,
+        side: str = "",
+        cell: Any = None,
+        x: float = 0.0,
+        y: float = 0.0,
+        z: float = 0.0,
+        heading_deg: float = 0.0,
+        name: str | None = None,
+    ) -> int:
+        """运行期生成一个实体（发射组件生成弹、任务层生成增援，都走这里）。
+
+        与装配期 :meth:`_create_one` 同一条链（解析类型→平台属性→登记→
+        占格→建部件→接线），差别只有三处：**名字自动生成防重**（registry
+        重名直接报错，生成物不能撞想定里的名字）、**格归属由调用方给**
+        （弹出生在发射平台的格里）、**部件当场接线**（initialize 在
+        ``mount_for`` 里现做——装配期那一步要等所有实体都造完才统一做，
+        这里没有那个等待）。
+        """
+        if not self._initialized:
+            self.initialize()
+        resolved = self.spec.types.resolve_platform(type_name)
+        entity = Entity()
+        entity.platform_params = dict(self.factory.resolved_platform_params(type_name))
+        side = side or str(entity.platform_params.get("side", ""))
+
+        base = name or f"{side or 'X'}-{type_name}"
+        candidate = base
+        n = 1
+        while self.registry.by_name(candidate) is not None:
+            n += 1
+            candidate = f"{base}-{n}"
+
+        entity_id = self.registry.register(
+            entity,
+            name=candidate,
+            side=side,
+            type_name=type_name,
+            tags=tuple(sorted(resolved.components)),
+        )
+        self.platform_params[entity_id] = entity.platform_params
+
+        if cell is None:
+            self.registry.unregister(entity_id)     # 登记了就得摘干净
+            raise SimulationError(
+                "spawn_platform 需要格归属（cell）——"
+                "弹出生在发射平台的格里（发射方自己的 my_cell）"
+            )
+        self.store.add(entity_id, cell)
+        self.store.set_pose(entity_id, x, y, z, heading_deg, 0.0)
+
+        for slot, part in self.factory.build_for_platform(type_name).items():
+            entity.add(slot, part)
+        entity.initialize(self.mount_for(entity_id))
+
+        self.entities[entity_id] = entity
+        return entity_id
 
     def make_locator(self, entity_id: int):
         """造一个"局部坐标 → 格归属"的转换器给机动组件用。

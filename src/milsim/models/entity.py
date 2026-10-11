@@ -84,6 +84,29 @@ class Entity:
         """槽名，**按挂载顺序**。保持顺序是为了遍历结果可复现。"""
         return list(self._order)
 
+    # -- 运行期指令（v0.13.58，§5.18） --------------------------------------
+
+    def command(self, cmd: str, args: dict[str, Any] | None = None) -> tuple[bool, str]:
+        """对**实体**下达一条运行期指令，按挂载顺序找接令的部件。
+
+        这是指令体系的唯一入口（§5.18）：调用方只说"这个实体，fire"，
+        **不寻址槽位**——"哪个部件接"是实体内部的分工。按挂载顺序找第一个
+        ``COMMANDS`` 里声明了这条指令的部件，把活交给它；没有任何部件声明
+        就整体拒绝。
+
+        返回 ``(是否成功, 给人看的原因)``。**不抛异常**——指令来自外部
+        （人在回路 / 决策模型），执行失败要能变成一条回执（ack），
+        而不是一个打穿引擎的异常。
+        """
+        data = args if args is not None else {}
+        for slot in self._order:
+            part = self._slots[slot]
+            if cmd in part.COMMANDS:
+                return part.execute(cmd, data)
+        return False, (
+            f"{self.name or f'实体{self.entity_id}'} 没有部件接受指令 {cmd!r}"
+        )
+
     def parts(self) -> list[Component]:
         return [self._slots[slot] for slot in self._order]
 

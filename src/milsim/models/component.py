@@ -67,6 +67,15 @@ class Component:
     #: 新增带默认值的参数不算破坏，这是扩展的唯一安全方式。
     PARAMS: Mapping[str, ParamSpec] = {}
 
+    #: 本部件的**运行期指令词汇表**（v0.13.58）：``{指令名: 一句话说明}``。
+    #:
+    #: 指令体系的分工（§5.18）：指令下到**实体**（``Entity.command``），实体
+    #: 按挂载顺序找第一个声明了这条指令的部件执行——调用方**不寻址槽位**，
+    #: 只说"这个实体，fire"。"哪个部件接"是实体内部的分工。
+    #: 同一实体上两个部件声明同名指令：**先挂的接**（挂载顺序确定，可复现）。
+    #: 空表 = 本部件没有任何运行期指令（纯被动计算，如雷达、战斗部）。
+    COMMANDS: Mapping[str, str] = {}
+
     #: 这个部件通常挂在哪个槽。**只是文档**，装配不靠它判断——
     #: 槽名由想定里的 ``component <slot> <type>`` 决定。
     SLOT_HINT = ""
@@ -125,6 +134,30 @@ class Component:
 
     def shutdown(self) -> None:
         """释放资源。有线程池、文件句柄之类的组件覆盖它。"""
+
+    # -- 运行期指令（v0.13.58，§5.18） --------------------------------------
+
+    def execute(self, cmd: str, args: Mapping[str, Any]) -> tuple[bool, str]:
+        """执行一条运行期指令。返回 ``(是否成功, 给人看的原因)``。
+
+        基类**只认识自己 ``COMMANDS`` 里声明过的**：没声明的一律拒绝——
+        "不接受指令"与"指令失败"要分得清，前者说明调用方找错了对象。
+        有指令的部件覆盖本方法，但**先查一遍父类**（保持同一道闸）：
+
+        .. code-block:: python
+
+            def execute(self, cmd, args):
+                ok, why = super().execute(cmd, args)
+                if not ok and cmd in self.COMMANDS:
+                    ...  # 真正的执行
+                return ok, why
+        """
+        if cmd not in self.COMMANDS:
+            return False, (
+                f"{self.describe()} 不接受指令 {cmd!r}"
+                + (f"（可接受：{'、'.join(self.COMMANDS)}）" if self.COMMANDS else "")
+            )
+        return False, f"{self.describe()} 的指令 {cmd!r} 没有实现"
 
     # -- 展示 --------------------------------------------------------------
 

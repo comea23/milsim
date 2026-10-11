@@ -69,6 +69,11 @@ class MountContext:
     comm: Any = None
     #: 这个实体的平台属性（§5.6），装配期已解析并校验过。
     platform_params: Mapping[str, Any] = field(default_factory=dict)
+    #: **运行期生成实体**的回调（v0.13.58，§5.18）——``Simulation.spawn_platform``。
+    #: 只有装配层能造实体（factory 在 Simulation 上），组件拿到的是回调而不
+    #: 是 Simulation 本体。纯单元测试里可以是 None——那时发射组件的 ``fire``
+    #: 会以"装配缺陷"拒发而不是崩掉。
+    spawn: Callable[..., Any] | None = None
 
     # -- 时间 --------------------------------------------------------------
 
