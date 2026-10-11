@@ -34,6 +34,11 @@ class Supply(Component):
         "resupply": "补给：args = {'supply_to': 实体名或编号}，须在补给半径内",
     }
 
+    #: 认领的任务类型（§5.19）：resupply 任务 = 给目标实体转手弹药与油料。
+    #: ★ 只管"转手"不管"开过去"——受补单位不在补给半径内任务失败
+    #: （``out_of_range``），要送货上门请先派 move 任务把车开过去。
+    TASKS = ("resupply",)
+
     PARAMS = {
         #: 自带弹药（发）。补给车上每个发射槽共用的"弹药堆"。
         "ammo": Params.integer(8, minimum=0),
@@ -43,7 +48,7 @@ class Supply(Component):
         "resupply_radius": Params.distance(200.0, minimum=0.0),
     }
 
-    __slots__ = ("_mount", "_ammo", "_fuel")
+    __slots__ = ("_mount", "_ammo", "_fuel", "_results")
 
     # -- 生命周期 ----------------------------------------------------------
 
@@ -51,6 +56,9 @@ class Supply(Component):
         self._mount = mount
         self._ammo = int(self.spec["ammo"])
         self._fuel = float(self.spec["fuel_kg"])
+        #: 在身 resupply 任务的一次性结论：task_id → (状态, 子状态)。
+        #: 补给在认领那一刻就发生完了，结论攒着等台账下一拍来取。
+        self._results: dict[int, tuple[str, str]] = {}
 
     # -- 查询 --------------------------------------------------------------
 
@@ -82,7 +90,13 @@ class Supply(Component):
         if tid == self._mount.entity_id:
             return False, "不能给自己补给"
 
+        return self._transfer(tid)
+
+    def _transfer(self, tid: int) -> tuple[bool, str]:
+        """给受补单位 ``tid`` 转手弹药与油料。``resupply`` 指令与补给任务
+        共用这一条链（§5.19）。"""
         store = self._mount.store
+        registry = self._mount.registry
         mine = store.position_of(self._mount.entity_id)
         theirs = store.position_of(tid)
         if mine is None or theirs is None:
@@ -122,6 +136,27 @@ class Supply(Component):
             f"补给完成：弹药 {ammo_used} 发、油料 {fuel_used:.0f} kg"
             f"（车上余：弹药 {self._ammo} 发、油 {self._fuel:.0f} kg）"
         )
+
+    # -- 任务执行器协议（§5.19）：resupply 任务 ------------------------------
+
+    def acquire_task(self, task) -> tuple[bool, str]:
+        """resupply 任务：认领那一刻就转手，结论等台账下一拍来取。"""
+        if task.target_id is None:
+            return False, "resupply 任务需要 target（受补实体）"
+        if int(task.target_id) == self._mount.entity_id:
+            return False, "不能给自己补给"
+        ok, why = self._transfer(int(task.target_id))
+        self._results[task.task_id] = (
+            ("complete", why) if ok else ("failed", why)
+        )
+        return True, why
+
+    def poll_task(self, task):
+        verdict = self._results.pop(task.task_id, None)
+        return verdict
+
+    def release_task(self, task) -> None:
+        self._results.pop(task.task_id, None)
 
 
 __all__ = ["Supply"]

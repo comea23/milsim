@@ -272,18 +272,25 @@ class Warhead(Component):
 
         name = str(self.spec["target_name"]).strip()
         if not name:
-            raise ConfigurationError(
-                f"{self.type_name or type(self).__name__}: 战斗部没有目标——"
-                "写 target_name。没有目标的战斗部什么也裁决不了，"
-                "静默挂着会让人误以为已经装了毁伤"
-            )
-        found = mount.registry.by_name(name)
-        if found is None:
-            raise ConfigurationError(
-                f"{self.type_name or type(self).__name__}: 目标 {name!r} 不在"
-                "这份想定里——检查 platform 名字是否写错"
-            )
-        self._target_id = found.entity_id
+            # 运行期出生的弹（§5.19）天生没有 target_name：目标由发射
+            # 那一刻经 ``assign_target_id`` 交接——没交接就裁决不了，
+            # 这个件会在 tick 里安静待命（不假装裁决）。
+            if getattr(mount, "runtime_spawn", False):
+                self._target_id = None
+            else:
+                raise ConfigurationError(
+                    f"{self.type_name or type(self).__name__}: 战斗部没有目标——"
+                    "写 target_name。没有目标的战斗部什么也裁决不了，"
+                    "静默挂着会让人误以为已经装了毁伤"
+                )
+        else:
+            found = mount.registry.by_name(name)
+            if found is None:
+                raise ConfigurationError(
+                    f"{self.type_name or type(self).__name__}: 目标 {name!r} 不在"
+                    "这份想定里——检查 platform 名字是否写错"
+                )
+            self._target_id = found.entity_id
 
         self._fuse = float(self.spec["fuse_radius"])
         self._kill = float(self.spec["kill_radius"])
@@ -320,11 +327,26 @@ class Warhead(Component):
 
         mount.every(self.spec["check_interval"], self._sweep, PRIORITY_ENGAGE)
 
+    def assign_target_id(self, entity_id: int) -> None:
+        """运行期交接目标（v0.13.59）：发射组件生成弹后立即调用。
+
+        与制导件的 ``assign_target_id`` 配对——制导管决定往哪飞，战斗部
+        决定打中了怎么算，两个部件都要在发射这一刻拿到同一个目标。
+        只对"出生时没有 target_name"的弹有意义（想定弹的目标在装配期
+        已定，改它等于偷换裁决对象，拒绝）。
+        """
+        if self._target_id is not None:
+            return
+        self._target_id = int(entity_id)
+
     # -- 巡回：采样 + 外推插补 --------------------------------------------
 
     def _sweep(self, engine: Any, event: Any = None) -> EventResult:
         """每 ``check_interval`` 一次：差分速度、查圈、按需插补。"""
         if self._judged or self._dead:
+            return EventResult.RESCHEDULE
+        if self._target_id is None:
+            # 运行期出生还没交接目标的弹：安静待命（不裁决、不报错）。
             return EventResult.RESCHEDULE
         now = int(engine.now)
         my = self._view.my_position()

@@ -192,6 +192,10 @@ class EventBus:
         self.weapon_fired: Signal = Signal("weapon_fired")
         #: 决策可追溯：每一次决策都应能回放"当时问了什么、答了什么"
         self.decision_issued: Signal = Signal("decision_issued")
+        #: 任务层生命周期（v0.13.59，§5.19）：``emit(task, action)``，
+        #: ``action`` ∈ assigned / active / complete / failed / canceled /
+        #: blocked（move 卡住，状态不变）。``task`` 是 :class:`~milsim.
+        #: models.task.base.Task` 对象（``to_dict()`` 给前端）。
         self.task_changed: Signal = Signal("task_changed")
         #: 机动件走不通：``emit(entity_id, blocked, reason)``。
         #: **只在状态跳变时发**（进/出"走不通"各一次），不是每帧发——每帧发

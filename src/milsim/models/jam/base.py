@@ -70,6 +70,11 @@ class Jammer(Component):
 
     SLOT_HINT = "jammer"
 
+    #: 认领的任务类型（§5.19）：jam 任务 = 压制一个目标的**台账**。
+    #: ★ 干扰行为本身仍由 ``aim_at`` 参数与电子战门面管（§9-59 运行期
+    #: 置向未实现）：任务层管的是"这项压制任务在不在身、目标没了要收摊"。
+    TASKS = ("jam",)
+
     PARAMS = {
         #: **峰值**功率（W）。想定里可写 ``100 kW``。0 = 没给 ⇒ 装配期报错：
         #: 一台没写功率的干扰机不是"不干扰"，是"参数没写全"。
@@ -146,6 +151,7 @@ class Jammer(Component):
         "total_power_w",
         "gain",
         "frequency_hz",
+        "_watch",
     )
 
     def initialize(self, mount) -> None:
@@ -221,6 +227,27 @@ class Jammer(Component):
             tag=name,
         )
         self.service.register(self.jammer_spec)
+        #: 在身的 jam 任务：task_id → 目标实体 ID（§5.19）。可多单并发。
+        self._watch: dict[int, int] = {}
+
+    # -- 任务执行器协议（§5.19）：jam 任务 -----------------------------------
+
+    def acquire_task(self, task) -> tuple[bool, str]:
+        if task.target_id is None:
+            return False, "jam 任务需要 target（目标实体）"
+        self._watch[task.task_id] = int(task.target_id)
+        return True, (
+            f"压制任务已登记（目标 {task.target_id}）——"
+            "辐射方向/开关仍由 aim_at 参数与电子战门面管（§9-59）"
+        )
+
+    def poll_task(self, task):
+        # 持续压制没有"干完"：到收工只有两条路——派令方撤令，或目标
+        # 消亡（任务管理器的死亡对账会来 release）。
+        return None
+
+    def release_task(self, task) -> None:
+        self._watch.pop(task.task_id, None)
 
     def _antenna_count(self) -> int:
         """这台机器几条天线 = 槽名尾部的裸数字（没有数字 ⇒ 1）。

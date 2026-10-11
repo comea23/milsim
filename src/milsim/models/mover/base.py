@@ -254,6 +254,9 @@ class Mover(Component):
         "stop": "就地停车",
     }
 
+    #: 认领的任务类型（§5.19）：move 任务 = 把车开到任务参数给的路上。
+    TASKS = ("move",)
+
     #: 运载器画像名（:mod:`milsim.services.map.nav` 里的键）。
     #: ``None`` = 不吃地形：对空中单位是对的，天空没有"通行代价"这回事，
     #: 硬给它安一个画像会让人以为天空也能分层寻路（§3.11 已说明不这么做）。
@@ -285,6 +288,7 @@ class Mover(Component):
         "_turn",
         "_fuel_cap",
         "_fuel_kg",
+        "_task",
     )
 
     # -- 生命周期 ----------------------------------------------------------
@@ -321,6 +325,8 @@ class Mover(Component):
         self._started_us: int | None = None
         self._finished_us: int | None = None
         self._last_tick_us: int | None = None
+        #: 在身的 move 任务（§5.19）。同时只背一项——第二项要等这项交还。
+        self._task = None
         #: 油箱（v0.13.58）。容量 0 = 没有油模型（历史想定逐字兼容）。
         self._fuel_cap = float(self.spec["fuel_capacity"])
         self._fuel_kg = self._fuel_cap          # 出厂满油
@@ -436,6 +442,48 @@ class Mover(Component):
                 return False, "路线规划不出（走不通或没有地图）"
             return True, f"机动 {len(route)} 个航路点"
         return False, f"指令 {cmd!r} 没有实现"
+
+    # -- 任务执行器协议（§5.19）：move 任务 ---------------------------------
+
+    def acquire_task(self, task) -> tuple[bool, str]:
+        """move 任务 = 把 ``payload['points']`` 交给航线（局部平面米）。
+
+        同时只背一项在身的 move 任务——车只有一个目的地；第二项要
+        等这项完成或交还。经纬度/格坐标的换算不属于机动件（§5.18
+        同一条分工），任务参数请给局部平面米。
+        """
+        if self._task is not None:
+            return False, "已有 move 任务在身（先等它完成或撤掉）"
+        points = (task.payload or {}).get("points")
+        if not isinstance(points, list) or not points:
+            return False, "move 任务需要 payload.points（[[x, y, (z)], ...]）"
+        try:
+            route = [
+                (
+                    float(p[0]), float(p[1]),
+                    float(p[2]) if len(p) > 2 else 0.0,
+                )
+                for p in points
+            ]
+        except (TypeError, ValueError, IndexError):
+            return False, "points 里的点必须是 [x, y, (z)] 数字三元组"
+        if not self.move_along_route(route):
+            return False, "路线规划不出（走不通或没有地图）"
+        self._task = task
+        return True, f"机动 {len(route)} 个航路点"
+
+    def poll_task(self, task):
+        if self._task is not task:
+            return None
+        if self.arrived():
+            self._task = None
+            return ("complete", "arrived")
+        return None
+
+    def release_task(self, task) -> None:
+        if self._task is task:
+            self._task = None
+            self.stop()
 
     # -- 查询 --------------------------------------------------------------
 

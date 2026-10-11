@@ -124,6 +124,10 @@ class TrackManager(Component):
 
     SLOT_HINT = "track"
 
+    #: 认领的任务类型（§5.19）：track 任务 = 盯住一个目标，本平台航迹表里
+    #: 出现它（自己探测或别人共享，同一张表）即收工。
+    TASKS = ("track",)
+
     __slots__ = (
         "view",
         "_recipients",
@@ -132,6 +136,7 @@ class TrackManager(Component):
         "_max_hops",
         "_share_us",
         "_next_share_us",
+        "_watch",
         "ticks",
         "absorbed",
         "fused",
@@ -156,6 +161,8 @@ class TrackManager(Component):
         #: —— 把初值设成 0 而不是 ``share_interval``，是为了让"节拍从 t=0
         #: 起算"这件事与其它周期事件一致，不必额外记一条相位规则。
         self._next_share_us = 0
+        #: 在身的 track 任务：task_id → 目标实体 ID（§5.19）。可多单并发。
+        self._watch: dict[int, int] = {}
         self.ticks = 0
         self.absorbed = 0
         self.fused = 0
@@ -267,6 +274,32 @@ class TrackManager(Component):
             sent += len(self.view.share_tracks(recipient, sent_at=now, deliver_at=now))
         self.shared += sent
         return sent
+
+    # -- 任务执行器协议（§5.19）：track 任务 ---------------------------------
+
+    def acquire_task(self, task) -> tuple[bool, str]:
+        """track 任务：盯一个目标实体，航迹表里出现它即收工。
+
+        ★ 判据是**本平台的航迹表**（含别人共享来的），不是"我的传感器
+        看到"——任务层不下探到量测，那是传感器的口径（§5.13）。
+        """
+        if task.target_id is None:
+            return False, "track 任务需要 target（目标实体）"
+        self._watch[task.task_id] = int(task.target_id)
+        return True, f"盯住目标 {task.target_id}"
+
+    def poll_task(self, task):
+        target_id = self._watch.get(task.task_id)
+        if target_id is None:
+            return None
+        for contact in self.view.my_contacts():
+            if contact.target_id == target_id:
+                self._watch.pop(task.task_id, None)
+                return ("complete", "tracked")
+        return None
+
+    def release_task(self, task) -> None:
+        self._watch.pop(task.task_id, None)
 
     # -- 展示 --------------------------------------------------------------
 

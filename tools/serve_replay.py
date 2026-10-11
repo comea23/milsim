@@ -231,7 +231,10 @@ def _recv_exact(sock: Any, n: int) -> bytes | None:
 MAX_UPLINK_POINTS = 64
 
 #: 上行指令字面量集合（``pace`` 单独处理——它动的是会话，不是仿真）。
-_UPLINK_CMDS = ("route", "goto", "stop", "fire", "resupply")
+#: ``assign_task`` / ``cancel_task``（v0.13.59，§5.19）：转发进实体命令层
+#: 的任务指令——人在回路当**派令方**。
+_UPLINK_CMDS = ("route", "goto", "stop", "fire", "resupply",
+                "assign_task", "cancel_task")
 
 
 def _ack(cmd: str, ok: bool, detail: str) -> str:
@@ -288,6 +291,29 @@ def parse_uplink(text: str) -> tuple[str, dict[str, Any], str]:
         second = data.get(field)
         if isinstance(second, bool) or not isinstance(second, (str, int)):
             return "", {}, f"{cmd} 需要 {field}（实体名或编号）"
+        return cmd, data, ""
+
+    # assign_task / cancel_task（§5.19）：target 是**派令方**（它得挂着
+    # TASK_MANAGER），受令人/目标实体在 assignees / victim 里给。
+    if cmd == "assign_task":
+        task_type = data.get("task_type")
+        if not isinstance(task_type, str) or not task_type.strip():
+            return "", {}, "assign_task 需要 task_type（attack/move/track/jam/comm/resupply）"
+        if data.get("victim") is not None and (
+            isinstance(data["victim"], bool)
+            or not isinstance(data["victim"], (str, int))
+        ):
+            return "", {}, "assign_task 的 victim 要是实体名或编号"
+        assignees = data.get("assignees")
+        if assignees is not None and not isinstance(assignees, list):
+            return "", {}, "assignees 要是实体名/编号列表"
+        if data.get("payload") is not None and not isinstance(data["payload"], dict):
+            return "", {}, "payload 要是字典"
+        return cmd, data, ""
+    if cmd == "cancel_task":
+        task_id = data.get("task_id")
+        if isinstance(task_id, bool) or not isinstance(task_id, int):
+            return "", {}, "cancel_task 需要 task_id（整数编号）"
         return cmd, data, ""
 
     if cmd == "goto":
@@ -354,6 +380,23 @@ def execute_uplink(sim: Simulation, data: dict[str, Any]) -> tuple[bool, str]:
     if cmd in ("fire", "resupply"):
         field = "victim" if cmd == "fire" else "supply_to"
         ok, why = sim.command(entity_id, cmd, {field: data.get(field)})
+        return ok, f"{entity.name} {cmd}：{why}"
+
+    # assign_task / cancel_task（§5.19）：同样转发进实体命令层——任务
+    # 台账自己验 task_type / 受令人 / 目标，这里只拼参数与回执。
+    if cmd in ("assign_task", "cancel_task"):
+        args: dict[str, Any] = {}
+        if cmd == "assign_task":
+            args["task_type"] = data.get("task_type")
+            for key_in, key_out in (("victim", "target"),
+                                    ("assignees", "assignees"),
+                                    ("payload", "payload"),
+                                    ("group", "group")):
+                if data.get(key_in) is not None:
+                    args[key_out] = data[key_in]
+        else:
+            args["task_id"] = data.get("task_id")
+        ok, why = sim.command(entity_id, cmd, args)
         return ok, f"{entity.name} {cmd}：{why}"
 
     mover = entity.component("mover")

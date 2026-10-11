@@ -86,6 +86,7 @@ from ...errors import ConfigurationError
 from ...services.comm import CommNodeSpec
 from ...services.params import Params
 from ..component import Component
+from ..task.base import COMM_NOTE
 
 
 class CommNode(Component):
@@ -95,6 +96,11 @@ class CommNode(Component):
     """
 
     SLOT_HINT = "comm"
+
+    #: 认领的任务类型（§5.19）：comm 任务 = 把一份报文交给通信网。
+    #: 任务参数：``payload['to']``（收件实体名/编号，必给）、
+    #: ``payload['text']``（内容，默认空串）。
+    TASKS = ("comm",)
 
     PARAMS = {
         # -- 网归属 ------------------------------------------------------------
@@ -154,6 +160,7 @@ class CommNode(Component):
         "node_spec",
         "network",
         "_jam",
+        "_mount",
         "nominal_snr",
         "jam_screened",
         "jam_suppressed",
@@ -175,6 +182,8 @@ class CommNode(Component):
                 f"{self.type_name or type(self).__name__}: 本次装配没有提供通信"
                 "门面，通信件无处登记——这是装配层的缺陷，不是参数问题"
             )
+        #: 装配上下文留给任务层用（§5.19 的 comm 任务要 store 与实体号）。
+        self._mount = mount
         #: 电子战门面（§5.14）。第二步起要它才判得了"谁在压我"。
         #: ``None`` = 这份装配没有电子战 ⇒ 不判（与"名册为空"同一条路）。
         self._jam = mount.jam_service()
@@ -267,6 +276,48 @@ class CommNode(Component):
         spec = getattr(self, "node_spec", None)
         if service is not None and spec is not None:
             service.unregister(spec.entity_id)
+
+    # -- 任务执行器协议（§5.19）：comm 任务 ----------------------------------
+
+    def acquire_task(self, task) -> tuple[bool, str]:
+        """comm 任务：把报文交给通信网，下一拍报"已送出"。
+
+        ★ "complete" 的含义是**送出**不是**送达**——报文进了在途队列之后
+        通不通由 §5.15 拓扑说了算，本件不假装能担保送达。要送达回执，
+        让收件方回信（那是编排层的事，不是本件的）。
+        """
+        payload = task.payload or {}
+        raw = payload.get("to")
+        if isinstance(raw, bool) or not isinstance(raw, (str, int)):
+            return False, "comm 任务需要 payload.to（收件实体名/编号）"
+        registry = self._mount.registry
+        if isinstance(raw, int):
+            tid = raw if registry.get(raw) is not None else None
+        else:
+            found = registry.by_name(str(raw))
+            tid = found.entity_id if found is not None else None
+        if tid is None:
+            return False, f"收件实体 {raw!r} 不在这份想定里"
+        text = str(payload.get("text", ""))
+        now = self._mount.now
+        store = self._mount.store
+        comm = self.service
+        if comm is None or comm.is_empty:
+            store.post_message(self._mount.entity_id, tid, COMM_NOTE,
+                               sent_at=now, deliver_at=now,
+                               payload={"text": text})
+        else:
+            store.enqueue_message(self._mount.entity_id, tid, COMM_NOTE,
+                                  sent_at=now, deliver_at=now,
+                                  payload={"text": text})
+        return True, f"报文已交给通信网（收件 {tid}）"
+
+    def poll_task(self, task):
+        # 报文送出即完成（见 acquire）——下一拍报收工。
+        return ("complete", "sent")
+
+    def release_task(self, task) -> None:
+        return None
 
     def describe(self) -> str:
         """``型号(槽 @ 网名)``，**未 ``initialize`` 时只给前半段**。"""

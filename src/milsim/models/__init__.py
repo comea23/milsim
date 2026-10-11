@@ -91,6 +91,11 @@ from .percep import (
 )
 from .unit_state import UnitState
 from .supply import FRAMEWORK_SUPPLY, Supply
+from .task import (
+    FRAMEWORK_TASKS,
+    Task,
+    TaskManager,
+)
 from .weapon import FRAMEWORK_WEAPONS, WEAPON_CLASSES, Weapon
 
 #: 框架自带的**参考实现**（组件）。想定里可以直接写这些名字，不需要
@@ -114,6 +119,7 @@ FRAMEWORK_COMPONENTS: tuple[type, ...] = (
     *FRAMEWORK_DAMAGE,
     *FRAMEWORK_WEAPONS,
     *FRAMEWORK_SUPPLY,
+    *FRAMEWORK_TASKS,
 )
 
 #: 框架自带的平台类。``PLATFORM`` 是所有平台类型的隐式根。
@@ -150,6 +156,10 @@ __all__ = [
     "Supply",
     "WEAPON_CLASSES",
     "Weapon",
+    # -- 任务层（§5.19）--
+    "FRAMEWORK_TASKS",
+    "Task",
+    "TaskManager",
     # -- 框架自带实现的清单 --
     "FRAMEWORK_COMPONENTS",
     "FRAMEWORK_PLATFORMS",

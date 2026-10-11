@@ -57,6 +57,11 @@ class Weapon(Component):
         "reload": "装填：args = {'rounds': 弹数}，装满到弹匣上限为止",
     }
 
+    #: 认领的任务类型（§5.19）：attack 任务 = 按任务参数齐射并盯到弹终结。
+    #: 多挂载时多个发射槽都认领 ``attack``——任务管理器按挂载顺序问，
+    #: 类别不符/没弹的槽拒绝，下一个槽接手（§5.19 认领链）。
+    TASKS = ("attack",)
+
     PARAMS = {
         #: 用途类别。``fire`` 时不看它（选弹是调用方的事），它给的是
         #: **想定作者与决策层的标签**——"这个槽是打谁的"。
@@ -72,7 +77,7 @@ class Weapon(Component):
         "stock": Params.integer(4, minimum=0),
     }
 
-    __slots__ = ("_mount", "_stock", "_capacity")
+    __slots__ = ("_mount", "_stock", "_capacity", "_jobs")
 
     # -- 生命周期 ----------------------------------------------------------
 
@@ -80,6 +85,9 @@ class Weapon(Component):
         self._mount = mount
         self._capacity = int(self.spec["stock"])
         self._stock = self._capacity            # 开局满弹
+        #: 在身的 attack 任务：task_id → {'target': id, 'missiles': [弹id]}。
+        #: 多个 attack 任务可并发（每项各盯各的弹），弹全终结即收工。
+        self._jobs: dict[int, dict[str, Any]] = {}
         wtype = str(self.spec["weapon_type"])
         if not wtype:
             raise ConfigurationError(
@@ -140,7 +148,6 @@ class Weapon(Component):
 
     def _fire(self, args: dict) -> tuple[bool, str]:
         me = self._mount.entity_id
-        store = self._mount.store
 
         if self._stock <= 0:
             return False, f"弹药耗尽（{self._stock}/{self._capacity}），先 reload"
@@ -151,24 +158,41 @@ class Weapon(Component):
         if tid == me:
             return False, "不能打自己"
 
+        mid, why = self._launch(tid)
+        if mid is None:
+            return False, why
+        return True, f"发射（弹={mid}，目标={tid}，余弹 {self._stock}）"
+
+    def _launch(self, tid: int) -> tuple[int | None, str]:
+        """发射一发：检查链（同方/包线/库存）→ 生成弹实体 → 交接目标。
+
+        ``fire`` 指令与 attack 任务共用这一条链。返回 ``(弹实体id, "")``
+        或 ``(None, 拒发原因)``——**不抛异常**，失败是回执。
+        """
+        me = self._mount.entity_id
+        store = self._mount.store
+
+        if self._stock <= 0:
+            return None, f"弹药耗尽（{self._stock}/{self._capacity}），先 reload"
+
         # ★ 敌我由想定态势判（§5.18 同 IFF 口径）：同方拒发——打自己人
         # 应该是想定写错了，响着失败比打出去强。
         my_side = self._mount.registry.side_of(me)
         target_side = self._mount.registry.side_of(tid)
         if my_side and target_side and my_side == target_side:
-            return False, f"目标 {tid} 与我同属 {my_side} 方，拒发"
+            return None, f"目标 {tid} 与我同属 {my_side} 方，拒发"
 
         # 包线检查：水平距离。位置走 store 真值——与制导件 target_point()
         # 同一条"发射计算机看得见真值"的口径（§5.8 已记账）。
         mine = store.position_of(me)
         theirs = store.position_of(tid)
         if mine is None or theirs is None:
-            return False, "发射方或目标没有位置（不在任何战区里）"
+            return None, "发射方或目标没有位置（不在任何战区里）"
         dist = hypot(theirs[0] - mine[0], theirs[1] - mine[1])
         rmin = float(self.spec["range_min"])
         rmax = float(self.spec["range_max"])
         if rmax > 0.0 and not (rmin <= dist <= rmax):
-            return False, (
+            return None, (
                 f"目标距离 {dist * 0.001:.1f} km 在包线外"
                 f"（{rmin * 0.001:.1f}~{rmax * 0.001:.1f} km），拒发"
             )
@@ -177,7 +201,7 @@ class Weapon(Component):
         # 初速/发射姿态由弹型号自己的 launch 参数给（§5.8）。
         spawn = self._mount.spawn
         if spawn is None:
-            return False, "装配缺陷：mount 没有 spawn 回调，发不出去"
+            return None, "装配缺陷：mount 没有 spawn 回调，发不出去"
         heading = degrees(atan2(theirs[0] - mine[0], -(theirs[1] - mine[1])))
         try:
             missile_id = int(
@@ -190,25 +214,95 @@ class Weapon(Component):
                 )
             )
         except Exception as exc:                    # noqa: BLE001——回执化
-            return False, f"生成弹实体失败：{exc}"
+            return None, f"生成弹实体失败：{exc}"
 
-        # 目标交给弹的制导管（§5.8）——弹从此自己盯它。
+        # 目标交给弹的制导管（§5.8）——弹从此自己盯它；战斗部同一条
+        # 交接（v0.13.59）：运行期出生的弹没有想定 target_name，两个
+        # 部件都在发射这一刻拿到目标。
         missile = self._mount.registry.get(missile_id)
         guide = getattr(missile, "component", lambda s: None)("guidance")
         assign = getattr(guide, "assign_target_id", None)
         if assign is None:
-            return False, (
+            return None, (
                 f"弹 {missile_id} 的平台类型没有 guidance 槽或制导件不支持"
                 "运行期指定目标"
             )
         assign(tid)
+        warhead = getattr(missile, "component", lambda s: None)("damage")
+        wassign = getattr(warhead, "assign_target_id", None)
+        if callable(wassign):
+            wassign(tid)
 
         self._stock -= 1
         bus = self._mount.bus
         emit = getattr(bus, "weapon_fired", None)
         if emit is not None:
             emit.emit(me, missile_id, tid, self.weapon_class())
-        return True, f"发射（弹={missile_id}，目标={tid}，余弹 {self._stock}）"
+        return missile_id, ""
+
+    # -- 任务执行器协议（§5.19）：attack 任务 --------------------------------
+
+    def acquire_task(self, task) -> tuple[bool, str]:
+        """attack 任务：按 ``payload`` 齐射，然后盯到弹全部终结。
+
+        - ``payload['rounds']``：发数（默认 1）；实际发出 min(发数, 余弹)。
+        - ``payload['weapon_class']``：给多挂载用的类别筛选——与本槽不符
+          就**拒绝**，让任务管理器去问下一个槽（§5.19 认领链）。
+        - 一项任务打一个目标；一发射失败（没弹/包线外）整项拒绝。
+        """
+        want = str((task.payload or {}).get("weapon_class", "")).strip()
+        if want and want != self.weapon_class():
+            return False, f"任务要 {want} 槽，本槽是 {self.weapon_class()}"
+        if task.target_id is None:
+            return False, "attack 任务需要 target（目标实体）"
+        rounds = max(1, int((task.payload or {}).get("rounds", 1)))
+        fired: list[int] = []
+        why = ""
+        for _ in range(rounds):
+            mid, why = self._launch(int(task.target_id))
+            if mid is None:
+                break
+            fired.append(mid)
+        if not fired:
+            return False, why
+        self._jobs[task.task_id] = {
+            "target": int(task.target_id),
+            "missiles": fired,
+        }
+        return True, f"齐射 {len(fired)} 发（弹 {fired}）"
+
+    def poll_task(self, task):
+        """盯弹：全部终结 ⇒ 收工。弹被注销 = 命中起爆；弹机动终止 = 失的。"""
+        job = self._jobs.get(task.task_id)
+        if job is None:
+            return None
+        registry = self._mount.registry
+        # 目标先没了：打完了就是打完了，不等剩余在飞弹慢慢落。
+        if registry.get(job["target"]) is None:
+            self._jobs.pop(task.task_id, None)
+            return ("complete", "target_destroyed")
+        alive = []
+        hits = 0
+        for mid in job["missiles"]:
+            entity = registry.get(mid)
+            if entity is None:
+                hits += 1          # 弹体注销只发生在命中起爆（§5.17）
+                continue
+            mover = getattr(entity, "component", lambda s: None)("mover")
+            term = getattr(mover, "terminated", None)
+            if callable(term) and term():
+                continue           # 失的弹自然终止
+            alive.append(mid)
+        if alive:
+            return None
+        self._jobs.pop(task.task_id, None)
+        total = len(job["missiles"])
+        return ("complete", f"命中 {hits}/{total}")
+
+    def release_task(self, task) -> None:
+        """撤单 = 不再盯这批弹（AbortSalvo 语义：只影响未发射的，
+        在飞的弹继续飞）。"""
+        self._jobs.pop(task.task_id, None)
 
 
 __all__ = ["WEAPON_CLASSES", "Weapon"]

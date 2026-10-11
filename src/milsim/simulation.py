@@ -836,7 +836,7 @@ class Simulation:
 
         self._initialized = True
 
-    def mount_for(self, entity_id: int) -> MountContext:
+    def mount_for(self, entity_id: int, *, runtime_spawn: bool = False) -> MountContext:
         """给某个实体造一份装配上下文。测试里也用它手工接线。"""
         entity = self.entities.get(entity_id)
         if entity is None:
@@ -856,6 +856,7 @@ class Simulation:
             comm=self.comm,
             platform_params=self.platform_params.get(entity_id, {}),
             spawn=self.spawn_platform,
+            runtime_spawn=runtime_spawn,
         )
 
     # -- 运行期指令与生成（v0.13.58，§5.18） --------------------------------
@@ -932,9 +933,11 @@ class Simulation:
 
         for slot, part in self.factory.build_for_platform(type_name).items():
             entity.add(slot, part)
-        entity.initialize(self.mount_for(entity_id))
-
+        # ★ 先登记再接线：initialize→mount_for 要能在 self.entities 里
+        # 找到这个实体（出生的弹还要经 spawn 回调再生育——嵌套出生时
+        # 这条顺序错了就是"实体 N 不在本仿真里"）。
         self.entities[entity_id] = entity
+        entity.initialize(self.mount_for(entity_id, runtime_spawn=True))
         return entity_id
 
     def make_locator(self, entity_id: int):
@@ -1027,6 +1030,24 @@ class Simulation:
         if found is None:
             return None
         return self.entities.get(found.entity_id)
+
+    def tasks(self) -> list[dict[str, Any]]:
+        """任务层全量快照（v0.13.59，§5.19）：所有台账的在途 + 归档。
+
+        观察/复盘/前端用。每项带 ``ledger``（sent / received / history）
+        与 ``holder``（台账所在实体名）。
+        """
+        out: list[dict[str, Any]] = []
+        for entity_id in sorted(self.entities):
+            entity = self.entities[entity_id]
+            for part in entity.parts():
+                snap = getattr(part, "snapshot", None)
+                if not callable(snap) or type(part).__name__ != "TaskManager":
+                    continue
+                for item in snap():
+                    item["holder"] = entity.name
+                    out.append(item)
+        return out
 
     def validate(self) -> list[str]:
         """全量自检。测试与调试用。"""
