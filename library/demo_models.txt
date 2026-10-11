@@ -201,6 +201,48 @@ component_type GUID_SRBM_1 : BALLISTIC_GUIDANCE
     intercept_gain  3.0
 end_component_type
 
+# ---- 涡扇发动机型号（WS 系列，机动件粒度）--------------------------------
+#
+# 拍板（2026-10-11）：发动机**不设独立组件**，按机动件型号落库——
+# `component mover WS_10` 直接可用。动力侧（thrust / specific_impulse）
+# 是该发动机的公开推力量级；弹体侧（mass / drag_area / …）沿用 SSM_CRUISE
+# 的基准画像，只为让记录能跑——**实际用弹时在派生型号里覆盖质量与气动**，
+# 否则一台飞机级发动机安在 1.2 t 弹体上就是一二级火箭的推重比。
+# 推力取巡航用的**干推力**（本模型单推力档，不含加力）；
+# 涡扇比冲 3000 s 量级（§5.8：火箭 250 s 上下）。
+#
+# 用法：派生（推荐）或直接引用——
+#
+#   component_type YJ_X : WS_10
+#       mass 1350 kg          # ← 换成真实弹的质量/气动，动力不动
+#       drag_area 0.03 m2
+#   end_component_type
+#
+#   platform_type ...
+#       component mover YJ_X
+#       end_component
+
+component_type WS_5 : MISSILE_MOVER
+    note   "涡扇-5：Spey 衍生方案（未列装），干推力 51 kN 量级"
+    source "公开资料估算（推力）；弹体侧为 SSM_CRUISE 基准画像"
+    thrust            51 kN
+    specific_impulse  3000 s
+end_component_type
+
+component_type WS_6 : MISSILE_MOVER
+    note   "涡扇-6：1970s 自研方案（未列装），干推力 122 kN 量级"
+    source "公开资料估算（推力）；弹体侧为 SSM_CRUISE 基准画像"
+    thrust           122 kN
+    specific_impulse 3000 s
+end_component_type
+
+component_type WS_10 : MISSILE_MOVER
+    note   "涡扇-10（太行）：干推力 100 kN 量级（加力 ~135 kN 不在本模型档内）"
+    source "公开资料估算（推力）；弹体侧为 SSM_CRUISE 基准画像"
+    thrust           100 kN
+    specific_impulse 3000 s
+end_component_type
+
 # ---- 平台 ---------------------------------------------------------------
 #
 # 平台型的属性**有参数表了**（§5.6）：表里的键来自代码层的 Platform 类
