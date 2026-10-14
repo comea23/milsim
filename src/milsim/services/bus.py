@@ -173,6 +173,7 @@ class EventBus:
         "message_delivered",
         "engagement_resolved",
         "weapon_fired",
+        "command_rejected",
         "decision_issued",
         "task_changed",
         "mover_blocked",
@@ -190,6 +191,12 @@ class EventBus:
         self.engagement_resolved: Signal = Signal("engagement_resolved")
         #: 武器发射（v0.13.58，§5.18）：``emit(发射方id, 弹实体id, 目标id, 武器类别)``。
         self.weapon_fired: Signal = Signal("weapon_fired")
+        #: 指令被拒（v0.13.60，§5.18）：``emit(实体id, 指令名, 拒绝原因)``。
+        #: **拒绝也是正式事件**（TF 三维裁决篇"拒绝、异常及未命中同样
+        #: 形成正式事件"）：复盘必须能回答"为什么没打"——包线外、死区、
+        #: 没弹、同方，都从这里查。只在 ``Simulation.command`` 统一入口
+        #: 发；任务链内部的拒领走 ``task_changed(failed)``，不重复发。
+        self.command_rejected: Signal = Signal("command_rejected")
         #: 决策可追溯：每一次决策都应能回放"当时问了什么、答了什么"
         self.decision_issued: Signal = Signal("decision_issued")
         #: 任务层生命周期（v0.13.59，§5.19）：``emit(task, action)``，

@@ -14,7 +14,9 @@ AFSIM                 milsim
 ``WSF_WEAPON``        :class:`Weapon`（弹药、发射、包线检查）
 ``WSF_LAUNCH_COMPUTER`` **简版**：出生位=发射平台当前位置，初速/姿态
                       用弹型号自己的 ``launch_speed`` / ``launch_fpa``；
-                      按目标距离做**包线检查**。抬升角解算留作增强。
+                      按目标距离做**包线检查** + **三维射界**（v0.13.60：
+                      水平扇区/高低扇区/结构死区，全部体轴）。抬升角
+                      解算留作增强。
 ``WeaponFired`` evt   ``bus.weapon_fired`` 信号
 ====================  ==========================================
 
@@ -40,9 +42,20 @@ from ...errors import ConfigurationError
 from ...services.params import Params
 from ...services.type_registry import register_component
 from ..component import Component
+from ..guidance.base import wrap180
 
 #: weapon_class 的合法取值（想定里写错装配期就报，带候选清单）。
 WEAPON_CLASSES: tuple[str, ...] = ("SAM", "SSM", "ASM", "AAM")
+
+
+def _in_arc(rel_deg: float, lo: float, hi: float) -> bool:
+    """方位 ``rel_deg``（已折到 [-180, 180]）是否落在体轴扇区 [lo, hi] 内。
+
+    ``lo > hi`` = 跨 ±180° 的环形扇区（如 ``170..-170`` 是正后方 20° 宽）。
+    """
+    if lo <= hi:
+        return lo <= rel_deg <= hi
+    return rel_deg >= lo or rel_deg <= hi
 
 
 @register_component("WEAPON")
@@ -75,9 +88,22 @@ class Weapon(Component):
         "range_max": Params.distance(0.0, minimum=0.0),
         #: 弹匣容量（发）。也是 ``reload`` 的上限。
         "stock": Params.integer(4, minimum=0),
+        #: 水平射界（度，**体轴**方位，v0.13.60）：目标方位换算到发射平台
+        #: 体轴后必须落在 [az_min, az_max] 内——射界随平台朝向转。
+        #: ``az_min > az_max`` = 跨 ±180° 的环形扇区。默认 ±180 = 全向。
+        "az_min": Params.angle(-180.0),
+        "az_max": Params.angle(180.0),
+        #: 高低射界（度）：目标仰角 = atan2(高度差, 水平距)。默认 ±90 = 不限。
+        #: 仰角相对水平面（项目没有俯仰姿态模型，平台永远水平——§5.18 记账）。
+        "el_min": Params.angle(-90.0),
+        "el_max": Params.angle(90.0),
+        #: 结构死区（体轴方位区间列表，每项 ``"lo..hi"`` 度）：平台自身
+        #: 结构（舰桥、肩部）遮挡的方向，落在里面拒发。与水平射界独立
+        #: 叠加——先判射界，再判死区。
+        "dead_zone": Params.strings(default=()),
     }
 
-    __slots__ = ("_mount", "_stock", "_capacity", "_jobs")
+    __slots__ = ("_mount", "_stock", "_capacity", "_jobs", "_dead_zones")
 
     # -- 生命周期 ----------------------------------------------------------
 
@@ -99,6 +125,31 @@ class Weapon(Component):
                 f"{self.describe()}：weapon_class {self.spec['weapon_class']!r} "
                 f"不认识（可用：{'、'.join(WEAPON_CLASSES)}）"
             )
+        el_lo = float(self.spec["el_min"])
+        el_hi = float(self.spec["el_max"])
+        if el_lo > el_hi:
+            raise ConfigurationError(
+                f"{self.describe()}：高低射界写反了（el_min {el_lo} > "
+                f"el_max {el_hi}）。高低射界不是环形——要打天顶就写 "
+                "el_min -89、el_max 89"
+            )
+        #: 解析好的结构死区 [(lo, hi), ...]（度，体轴）。写法错误在
+        #: **装配期**报——发射时才发现等于白挂了遮挡。
+        self._dead_zones: list[tuple[float, float]] = []
+        for raw in self.spec["dead_zone"]:
+            text = str(raw).strip()
+            if ".." not in text:
+                raise ConfigurationError(
+                    f"{self.describe()}：死区 {text!r} 看不懂——每项写 "
+                    "'lo..hi'（度，体轴方位），如 '170..-170' 是正后方"
+                )
+            lo_s, hi_s = text.split("..", 1)
+            try:
+                self._dead_zones.append((float(lo_s), float(hi_s)))
+            except ValueError as exc:
+                raise ConfigurationError(
+                    f"{self.describe()}：死区 {text!r} 的端点不是数——{exc}"
+                ) from exc
 
     # -- 查询 --------------------------------------------------------------
 
@@ -196,6 +247,39 @@ class Weapon(Component):
                 f"目标距离 {dist * 0.001:.1f} km 在包线外"
                 f"（{rmin * 0.001:.1f}~{rmax * 0.001:.1f} km），拒发"
             )
+
+        # 三维射界（v0.13.60，TF 三维裁决篇）：方位与仰角都换算到**体轴**
+        # 再判——射界随平台朝向转（"随姿态变化"），结构死区是平台自身
+        # 的遮挡、同样按体轴。仰角相对水平面：项目没有俯仰姿态模型，
+        # 平台恒水平（§5.18 记账）。位姿走 store 真值，与上面的口径同源。
+        my_pose = store.pose_of(me)
+        if my_pose is None:
+            return None, "发射方没有位姿（不在任何战区里）"
+        dx = theirs[0] - mine[0]
+        dy = theirs[1] - mine[1]
+        bearing = degrees(atan2(dx, -dy))       # 地理方位：0=北(+y)，顺时针
+        rel = wrap180(bearing - my_pose[3])     # 体轴方位
+        elev = degrees(atan2(theirs[2] - mine[2], dist))
+        az_lo = float(self.spec["az_min"])
+        az_hi = float(self.spec["az_max"])
+        if not _in_arc(rel, az_lo, az_hi):
+            return None, (
+                f"目标体轴方位 {rel:.0f}° 在水平射界"
+                f" [{az_lo:.0f}..{az_hi:.0f}°] 外，拒发"
+            )
+        el_lo = float(self.spec["el_min"])
+        el_hi = float(self.spec["el_max"])
+        if not (el_lo <= elev <= el_hi):
+            return None, (
+                f"目标仰角 {elev:.1f}° 在高低射界"
+                f" [{el_lo:.1f}..{el_hi:.1f}°] 外，拒发"
+            )
+        for lo, hi in self._dead_zones:
+            if _in_arc(rel, lo, hi):
+                return None, (
+                    f"目标体轴方位 {rel:.0f}° 落在结构死区"
+                    f" [{lo:.0f}..{hi:.0f}°] 内（平台自遮挡），拒发"
+                )
 
         # 简版发射计算机：出生位=发射平台当前位置，弹的姿态朝目标；
         # 初速/发射姿态由弹型号自己的 launch 参数给（§5.8）。

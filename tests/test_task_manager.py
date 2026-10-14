@@ -130,12 +130,17 @@ def _attack_rig(*, stock: int = 2):
 
     mount = SimpleNamespace(
         entity_id=0, registry=reg,
-        store=SimpleNamespace(position_of=lambda eid: positions.get(eid)),
+        store=SimpleNamespace(
+            position_of=lambda eid: positions.get(eid),
+            pose_of=lambda eid: (*positions.get(eid, (0.0, 0.0, 0.0)), 0.0, 0.0),
+        ),
         bus=EventBus(), spawn=spawn, my_cell=lambda: "CELL",
     )
     spec = {
         "weapon_class": "SSM", "weapon_type": "M", "range_min": 0.0,
         "range_max": 0.0, "stock": stock,
+        "az_min": -180.0, "az_max": 180.0,
+        "el_min": -90.0, "el_max": 90.0, "dead_zone": (),
     }
     weapon = Weapon(spec=spec)
     weapon.bind(shooter)
@@ -712,3 +717,24 @@ end_network
     assert (r_mgr.statistics()["received"]
             + r_mgr.statistics()["history"]) >= 1
     assert manager._retries == 0            # 直投无需重传
+
+
+def test_command_rejection_is_a_formal_event(sim: Simulation) -> None:
+    """拒绝也是正式事件（v0.13.60）：不存在的实体、被部件拒掉的指令，
+    都从 ``Simulation.command`` 落 ``bus.command_rejected``。"""
+    seen: list[tuple[int, str, str]] = []
+    sub = sim.bus.command_rejected.subscribe(
+        lambda eid, cmd, why: seen.append((eid, cmd, why))
+    )
+    try:
+        ok, why = sim.command(999_999, "fire", {})
+        assert ok is False and "不存在" in why
+        ok, why = sim.command(
+            sim.entity_by_name("CMD_A").entity_id, "self_destruct", {}
+        )
+        assert ok is False
+    finally:
+        sub.unsubscribe()
+    assert [e[0] for e in seen] == [999_999, sim.entity_by_name("CMD_A").entity_id]
+    assert [e[1] for e in seen] == ["fire", "self_destruct"]
+    assert all(e[2] for e in seen)

@@ -874,9 +874,16 @@ class Simulation:
         if entity is None:
             found = self.registry.get(entity_id)
             if found is None:
-                return False, f"实体 {entity_id} 不存在"
+                why = f"实体 {entity_id} 不存在"
+                self.bus.command_rejected.emit(entity_id, cmd, why)
+                return False, why
             entity = found
-        return entity.command(cmd, args or {})
+        ok, why = entity.command(cmd, args or {})
+        if not ok:
+            # 拒绝也是正式事件（v0.13.60，§5.18）：复盘要能回答"为什么
+            # 没打/没动"。任务链内部的拒领走 task_changed(failed)，不在这。
+            self.bus.command_rejected.emit(entity_id, cmd, why)
+        return ok, why
 
     def spawn_platform(
         self,

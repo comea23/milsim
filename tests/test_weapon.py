@@ -75,6 +75,11 @@ def _weapon_spec(**over):
         "range_min": 0.0,
         "range_max": 40_000.0,
         "stock": 2,
+        "az_min": -180.0,
+        "az_max": 180.0,
+        "el_min": -90.0,
+        "el_max": 90.0,
+        "dead_zone": (),
     }
     spec.update(over)
     return spec
@@ -104,14 +109,26 @@ class _StubGuidance:
         self.target_id = eid
 
 
-def _rig(*, stock: int = 2, range_max: float = 40_000.0):
-    """发射方 id=0 在原点，目标 id=1 在正东 30 km，弹出生 id=10。"""
+def _rig(
+    *,
+    stock: int = 2,
+    range_max: float = 40_000.0,
+    heading: float = 0.0,
+    target_pos: tuple[float, float, float] = (30_000.0, 0.0, 0.0),
+    **spec_over,
+):
+    """发射方 id=0 在原点（体轴朝 ``heading``），目标 id=1 在 ``target_pos``，
+    弹出生 id=10。其余关键字原样透传给 ``_weapon_spec``。"""
     reg = EntityRegistry()
     shooter, target = _StubEntity(0, "DDG"), _StubEntity(1, "TARGET")
     reg.register(shooter, name="DDG", side="red", type_name="SHIP")
     reg.register(target, name="TARGET", side="blue", type_name="SHIP")
 
-    positions = {0: (0.0, 0.0, 0.0), 1: (30_000.0, 0.0, 0.0)}
+    positions = {0: (0.0, 0.0, 0.0), 1: target_pos}
+    poses = {
+        0: (0.0, 0.0, 0.0, heading, 0.0),
+        1: (*target_pos, 0.0, 0.0),
+    }
     spawned: list[dict] = []
 
     def spawn(type_name, **kw):
@@ -122,7 +139,10 @@ def _rig(*, stock: int = 2, range_max: float = 40_000.0):
         spawned.append({"type": type_name, "guide": guide, **kw})
         return mid
 
-    store = SimpleNamespace(position_of=lambda eid: positions.get(eid))
+    store = SimpleNamespace(
+        position_of=lambda eid: positions.get(eid),
+        pose_of=lambda eid: poses.get(eid),
+    )
 
     mount = SimpleNamespace(
         entity_id=0,
@@ -133,7 +153,7 @@ def _rig(*, stock: int = 2, range_max: float = 40_000.0):
         my_cell=lambda: "CELL",
     )
 
-    weapon = Weapon(spec=_weapon_spec(stock=stock, range_max=range_max))
+    weapon = Weapon(spec=_weapon_spec(stock=stock, range_max=range_max, **spec_over))
     weapon.bind(shooter)
     weapon.initialize(mount)
     return weapon, spawned, SimpleNamespace(registry=reg, store=store)
@@ -168,6 +188,60 @@ def test_weapon_fire_rejects_when_dry() -> None:
     ok, why = weapon.execute("fire", {"target": "TARGET"})
     assert ok is False
     assert "弹药耗尽" in why and spawned == []
+
+
+# ---------------------------------------------------------------------------
+# Weapon：三维射界（v0.13.60）——水平扇区/高低扇区/结构死区，全部体轴
+# ---------------------------------------------------------------------------
+
+
+def test_weapon_rejects_target_above_elevation_envelope() -> None:
+    # 目标在 (30km, 0, 20km)：仰角 atan2(20, 30) ≈ 33.7° > 30 → 拒
+    weapon, spawned, _ = _rig(el_max=30.0, target_pos=(30_000.0, 0.0, 20_000.0))
+    ok, why = weapon.execute("fire", {"target": "TARGET"})
+    assert ok is False and "高低射界" in why and spawned == []
+
+
+def test_weapon_elevation_envelope_admits_level_target() -> None:
+    # 同一包线，平飞目标仰角 0 → 过。默认 ±90 不设限的行为由其余用例覆盖。
+    weapon, spawned, _ = _rig(el_max=30.0)
+    ok, why = weapon.execute("fire", {"target": "TARGET"})
+    assert ok and why and len(spawned) == 1
+
+
+def test_weapon_rejects_target_in_structural_dead_zone() -> None:
+    # 发射方朝北（heading 0），目标正东 = 体轴 90°；死区 [60..120] 罩住它
+    weapon, spawned, _ = _rig(dead_zone=["60..120"])
+    ok, why = weapon.execute("fire", {"target": "TARGET"})
+    assert ok is False and "结构死区" in why and spawned == []
+    assert weapon.stock() == 2                       # 拒发不扣弹
+
+
+def test_weapon_azimuth_sector_rotates_with_heading() -> None:
+    # 窄射界 [-10..10]：朝北时正东目标在体轴 90° → 拒；
+    # 转向东（heading 90）后同一目标进体轴 0° → 过，弹头朝目标。
+    weapon, spawned, _ = _rig(az_min=-10.0, az_max=10.0, heading=0.0)
+    ok, why = weapon.execute("fire", {"target": "TARGET"})
+    assert ok is False and "水平射界" in why and spawned == []
+
+    weapon, spawned, _ = _rig(az_min=-10.0, az_max=10.0, heading=90.0)
+    ok, why = weapon.execute("fire", {"target": "TARGET"})
+    assert ok, why
+    assert spawned[0]["heading_deg"] == pytest.approx(90.0)
+
+
+def test_weapon_circular_arc_sector_covers_the_rear() -> None:
+    # az 170..-170（lo > hi = 跨 ±180 环形）= 正后方扇区。
+    # y 轴指南：正南目标 (0, +30km) 方位 180°，体轴也是 180° → 在扇区内；
+    # 正东目标（体轴 90°）不在 → 拒。
+    weapon, _, _ = _rig(az_min=170.0, az_max=-170.0,
+                        target_pos=(0.0, 30_000.0, 0.0))
+    ok, why = weapon.execute("fire", {"target": "TARGET"})
+    assert ok, why
+
+    weapon, spawned, _ = _rig(az_min=170.0, az_max=-170.0)
+    ok, why = weapon.execute("fire", {"target": "TARGET"})
+    assert ok is False and "水平射界" in why and spawned == []
 
 
 def test_weapon_fire_rejects_same_side() -> None:
