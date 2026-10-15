@@ -106,7 +106,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
-from math import cos, hypot, inf, isfinite, radians, sin, sqrt
+from math import atan2, cos, degrees, hypot, inf, isfinite, radians, sin, sqrt
 
 from ...engine import PRIORITY_SENSOR, EventResult
 from ...errors import ConfigurationError
@@ -239,6 +239,29 @@ class RadarSensor(Component):
         #: 转角"的隐含前提。固定指向（``fov == 0``）时**必须给非零值**。
         #: 它同时是第 6 步"驻留时间"里那个张角（``dwell = 波束宽 ÷ 角速度``）。
         "beam_width": Params.angle(0.0, minimum=0.0, maximum=360.0),
+        #: **俯仰视场**（度，v0.13.61，相对**水平面**的绝对仰角带）：天线在
+        #: 俯仰上覆盖的范围，出了这个仰角带就不探测——第 3 步的第三道门，
+        #: 与距离门/方位门同层（带外算"没扫到"，**不**进 :attr:`geometry_blocked`）。
+        #: 默认 −90..+90 = 全开 ⇒ 历史想定逐字不变。舰载相控阵"俯仰 2-80°"
+        #: 这类口径就写这两个键。目标恰在天顶/天底（水平距离为 0）按 ±90° 计。
+        "fov_el_min": Params.angle(-90.0, minimum=-90.0, maximum=90.0),
+        "fov_el_max": Params.angle(90.0, minimum=-90.0, maximum=90.0),
+        #: **电子扫描损失指数**（v0.13.61）：目标偏离**天线面法向**时，回波
+        #: 增益按 ``cos^指数(方位偏角) · cos^指数(俯仰偏角)`` 衰减——AFSIM
+        #: ``electronic_beam_steering_loss_exponent`` 的同一口径（源码
+        #: ``WsfEM_Antenna::ComputeBeamSteeringLoss``）。偏角超过 ±90° 一律
+        #: 记 0（背面照不到）。**0 = 不判**（默认，历史想定逐字不变）。
+        #:
+        #: ★ 相控阵固定扇面的"斜视衰减"就是它：指数取 4（平面阵投影孔径
+        #: 的 cos⁴ 律）时，45° 偏角掉 ``40·lg(cos45°) = 6.02 dB``，探测距离
+        #: 乘 ``cos45° ≈ 0.707``——AN/SPY-1D"法线 410 km / ±45° 290 km"
+        #: （290/410 = 0.7073）与它**解析吻合**，这不是拟合是物理。
+        #: 方位偏角的零点是 ``scan_center``（扇面法向），俯仰偏角的零点是
+        #: ``face_elevation``。
+        "ebs_loss_exponent": Params.number(0.0, minimum=0.0),
+        #: **天线面基准俯仰**（度，v0.13.61）：EBS 偏角里俯仰一支的零点——
+        #: 天线面法向的仰角。0 = 法线水平（默认：舰载相控阵天线面垂直）。
+        "face_elevation": Params.angle(0.0, minimum=-90.0, maximum=90.0),
         # -- 第 3 步的上界 ----------------------------------------------------
         #: 搜索半径的上界（米）。0 = 用 ``detect_range``。
         #: 为什么要有它：标定法下 Pd 在 ``detect_range`` 处正好等于
@@ -399,6 +422,45 @@ class RadarSensor(Component):
         "establish_window": Params.integer(5, minimum=1),
         "hits_to_maintain": Params.integer(2, minimum=1),
         "maintain_window": Params.integer(5, minimum=1),
+        # -- 第 8b 步：TWS 容量 + 专用跟踪波束（v0.13.62，§5.12.11）----------
+        #: **边扫描边跟踪的航迹容量**（条）。``0`` = 不限（默认，旧想定逐字
+        #: 不变）；``>0`` = 本传感器最多同时保持这么多条**已建航**——容量满时
+        #: 新目标的命中按"没检测到"记账（进 M/N 窗口当一次漏检，与假目标洪泛
+        #: 同一口径），并计入 :attr:`capacity_blocked`。
+        #:
+        #: ★ 满员时的**席位分配按 SNR 强者优先**：本拍照到的候选先按粗 SNR
+        #: （:meth:`_rank_snr`，不掷骰、不进量测）从强到弱排序再逐个判——
+        #: "先近后远/先大后小"是雷达值班员的常规做法。★ 这会改变候选间的
+        #: 随机数分配次序，所以**只在容量开启时排序**：默认 0 下随机流逐位不动。
+        #: ★ 容量按**传感器组件**计（一个四阵面雷达 = 4 个 sensor，各有各的
+        #: 席位）：组件是本框架的最小装配单元，跨组件的"全舰总额"留给想定
+        #: 作者用容量数值自己去分。
+        "track_capacity": Params.integer(0, minimum=0),
+        #: **专用跟踪波束的重访节拍**（微秒）。``0`` = 关（默认，旧想定逐字
+        #: 不变）；``>0`` = 已建航的目标每隔这么久被**电扫**照一次——波束
+        #: 直接转向目标，**不过**方位扫描门（不依赖天线相位扫到它），但距离
+        #: 门、俯仰带、几何、方程、M/N 全部照走（专用波束也要过第 3 步的
+        #: 仰角带——那是天线面的物理覆盖，电扫绕不开）。
+        #:
+        #: ★ 这就是相控阵"跟踪帧率与搜索帧率解耦"的那一层：机械雷达的波束
+        #: 扫到目标才能更新（重访 = 扫描周期），ESA 可以插空回访。**已建航**
+        #: 才有专用波束——建航仍靠搜索扫掠（波束得先"碰上"目标才知道要跟）。
+        #: ★ 每次专用照射都要花**驻留时间**（:attr:`dwell_us`），占用受
+        #: ``track_duty_max`` 管制——见下一键。
+        "track_interval": Params.duration(0, minimum=0),
+        #: **专用跟踪波束的占空比上限**（0~1）。默认 1.0 = 全部波束时间都可
+        #: 挪用（不判）；``<1`` = 每个专用跟踪节拍里，花在专用照射上的波束
+        #: 时间不得超过 ``track_duty_max × track_interval``——超支时按目标
+        #: 最近一次 Pd **从强到弱**服务，轮不上的这一拍跳过（自然降帧率），
+        #: 计入 :attr:`track_skipped`。
+        #:
+        #: ★ 语义是"波束时间预算"：每个航迹每个节拍吃 ``dwell_us``，
+        #: ``N×dwell ≤ duty×track_interval`` 装不下就保强弃弱——搜索的那份
+        #: 时间不受它管（扫掠节拍是独立的事件源，占空比只裁专用跟踪这一支）。
+        #: ★ ``track_interval > 0`` 而 ``track_duty_max ≤ 0`` = 装配期报错：
+        #: "开了专用波束却一分时间都不给"是自相矛盾的配置，静默跑成
+        #: "永远不更新"比报错难看得多（半给不行）。
+        "track_duty_max": Params.number(1.0, minimum=0.0, maximum=1.0),
     }
 
     __slots__ = (
@@ -412,6 +474,10 @@ class RadarSensor(Component):
         "fov_deg",
         "face_deg",
         "beam_deg",
+        "fov_el_min_deg",
+        "fov_el_max_deg",
+        "ebs_exp",
+        "face_elev_deg",
         "phase_deg",
         "spin",
         "swept_deg",
@@ -461,6 +527,13 @@ class RadarSensor(Component):
         "detections",
         "geometry_blocked",
         "last_pd",
+        "track_capacity",
+        "track_duty",
+        "_track_interval_us",
+        "dwell_us",
+        "_track_pd",
+        "capacity_blocked",
+        "track_skipped",
     )
 
     # -- 生命周期 ----------------------------------------------------------
@@ -489,6 +562,26 @@ class RadarSensor(Component):
         self.beam_deg = float(self.spec["beam_width"])
         if self.fov_deg <= 0.0 and self.beam_deg <= 0.0:
             self._require_beam_width()
+        #: 俯仰视场（v0.13.61）与电子扫描损失（v0.13.61）。默认值下两者
+        #: 都"不判"——旧想定的每一步逐字不变。
+        self.fov_el_min_deg = float(self.spec["fov_el_min"])
+        self.fov_el_max_deg = float(self.spec["fov_el_max"])
+        self.ebs_exp = float(self.spec["ebs_loss_exponent"])
+        self.face_elev_deg = float(self.spec["face_elevation"])
+        #: TWS 容量 + 专用跟踪波束（v0.13.62，§5.12.11）。默认值下三者都
+        #: "不判"——容量 0 = 不限、节拍 0 = 无专用波束，旧想定逐字不变。
+        self.track_capacity = int(self.spec["track_capacity"])
+        self._track_interval_us = int(self.spec["track_interval"])
+        self.track_duty = float(self.spec["track_duty_max"])
+        if self._track_interval_us > 0 and self.track_duty <= 0.0:
+            raise ConfigurationError(
+                f"{self.type_name or type(self).__name__}: track_interval 开了"
+                "专用跟踪波束，track_duty_max 却是 0——一分波束时间都不给，"
+                "专用照射永远不会发生。要么给正的占空比，要么把 track_interval"
+                " 关掉（0）：自相矛盾的配置不静默跑"
+            )
+        #: 一次照射的驻留时间（微秒）——专用跟踪账本里"照一个波位"的单价。
+        self.dwell_us = self._resolve_dwell_us()
 
         self.phase_deg = 0.0
         self.spin = 1
@@ -523,6 +616,14 @@ class RadarSensor(Component):
         self._hits: dict[int, deque[bool]] = {}
         #: 已建航的目标。
         self._tracks: set[int] = set()
+        #: 每个已建航目标**最近一次**的检测概率（专用跟踪节拍的排序键，
+        #: v0.13.62）：预算装不下时保强弃弱。被照射就更新（不管命中没有），
+        #: 目标注销时随 ``_forget`` 一起清。
+        self._track_pd: dict[int, float] = {}
+        #: 容量满员时被挡掉的新目标命中次数（诊断，v0.13.62）。
+        self.capacity_blocked = 0
+        #: 专用跟踪节拍里因波束时间预算装不下而被跳过的照射台次（诊断）。
+        self.track_skipped = 0
         #: 每个目标**上一次量测** ``(时刻 us, x, y, z, σ_pos)``——速度估计的
         #: 基准。速度 = 相邻两次**带噪量测**的差分（不是真值差分），σv =
         #: ``hypot(σ₁, σ₂)/Δt``（两个独立位置误差传播到差分上）。
@@ -575,6 +676,10 @@ class RadarSensor(Component):
         self._nearest_phantom_m = float("inf")
 
         mount.every(self.spec["beam_step"], self._sweep, PRIORITY_SENSOR)
+        if self._track_interval_us > 0:
+            #: 专用跟踪波束是**独立于扫掠的第二事件源**：扫掠管"搜索 + 顺路
+            #: 更新"，这个节拍管"插空回访已建航的目标"（§5.12.11）。
+            mount.every(self._track_interval_us, self._track_tick, PRIORITY_SENSOR)
 
     def _require_beam_width(self) -> None:
         """固定指向（``fov == 0``）不许配零宽波束：那台雷达什么都照不到。
@@ -618,6 +723,48 @@ class RadarSensor(Component):
             scan_rate = 360.0 / (self.period_us / 1.0e6)
             dwell = eq.dwell_time(self.beam_deg, scan_rate)
         return eq.pulses_in_dwell(dwell, prf)
+
+    def _resolve_dwell_us(self) -> float:
+        """一次照射的**驻留时间**（微秒）——专用跟踪账本的成本单价（v0.13.62）。
+
+        与 :meth:`_resolve_pulses` 同一个口径（``驻留 = 波束宽 ÷ 角速度``，
+        角速度按 ``360° / scan_interval``；固定指向按评估间隔）：
+
+        * ``fov <= 0``（固定指向）：波束不动，"照一个波位"就是一个评估间隔；
+        * ``beam_width > 0``：``beam_width × scan_interval / 360``；
+        * 其余（转着扫但没给波束宽度）：退回评估间隔——有波束宽度才谈得上
+          "在一个波位上停多久"，没给就是"不知道"，拿评估间隔顶上与
+          :meth:`_resolve_pulses` 的固定指向支同一条退路。
+        """
+        if self.fov_deg <= 0.0:
+            return float(self.spec["beam_step"])
+        if self.beam_deg > 0.0:
+            return self.beam_deg * self.period_us / 360.0
+        return float(self.spec["beam_step"])
+
+    def _rank_snr(self, target_id: int, me: tuple[float, float, float]) -> float:
+        """候选排序用的**粗 SNR**（线性；容量满员时"强者先占槽"的排序键）。
+
+        只走几何 + 方程，**不掷骰、不进量测、不算干扰**——它决定的是"先判
+        谁"，不是"判出什么"，所以故意比 :meth:`_evaluate` 便宜。排序键是
+        无干扰、无 EBS 的单脉冲 SNR：排序发生在第 3 步的精筛之前，几何/仰角
+        都还没判，拿"最乐观"的数排队正是本意（排到最后自然会被门挡掉）。
+
+        自己与查不到位置的目标给 ``-inf``：一定排最后，且 ``_evaluate``
+        本来就会把它们跳掉。
+        """
+        if target_id == self.view.entity_id:
+            return float("-inf")
+        target = self.view.position_of(target_id)
+        if target is None:
+            return float("-inf")
+        dx = target[0] - me[0]
+        dy = target[1] - me[1]
+        horizontal = hypot(dx, dy)
+        if horizontal > self.max_range_m:
+            return float("-inf")
+        slant = sqrt(horizontal * horizontal + (target[2] - me[2]) ** 2)
+        return self.single_pulse_snr(slant, self._rcs_of(target_id))
 
     # -- 第 5~7 步的预算 ---------------------------------------------------
 
@@ -829,7 +976,12 @@ class RadarSensor(Component):
             )
 
     def _measurement_sigmas(
-        self, slant_m: float, rcs_m2: float, *, jammer_noise_w: float = 0.0
+        self,
+        slant_m: float,
+        rcs_m2: float,
+        *,
+        jammer_noise_w: float = 0.0,
+        steer_gain: float = 1.0,
     ) -> tuple[float, float]:
         """本次量测的两个 σ：``(方位误差 度, 距离误差 米)``。
 
@@ -847,7 +999,7 @@ class RadarSensor(Component):
         if not self.errors_from_snr:
             return self.error_azimuth_deg, self.error_range_m
         snr = self.single_pulse_snr(
-            slant_m, rcs_m2, jammer_noise_w=jammer_noise_w
+            slant_m, rcs_m2, jammer_noise_w=jammer_noise_w, steer_gain=steer_gain
         )
         return (
             eq.angle_measurement_sigma(float(self.spec["beamwidth_h"]), snr),
@@ -865,6 +1017,7 @@ class RadarSensor(Component):
         jammer_noise_w: float = 0.0,
         range_bias_m: float = 0.0,
         azimuth_bias_deg: float = 0.0,
+        steer_gain: float = 1.0,
     ) -> tuple[float, float]:
         """在**极坐标**上加量测误差，返回 ``(带误差的方位, 带误差的水平距离)``。
 
@@ -894,7 +1047,7 @@ class RadarSensor(Component):
         horizontal_m = sqrt(max(0.0, biased_slant * biased_slant - dz * dz))
 
         sigma_bearing, sigma_range = self._measurement_sigmas(
-            slant_m, rcs_m2, jammer_noise_w=jammer_noise_w
+            slant_m, rcs_m2, jammer_noise_w=jammer_noise_w, steer_gain=steer_gain
         )
         # 非有限的 σ 意味着"这次量测根本没有精度可言"（SNR 为 0 或发散）。
         # 此时**不加噪**：``gauss(0, inf)`` 会给 nan，而一个 nan 位置会沿着
@@ -1339,6 +1492,27 @@ class RadarSensor(Component):
             * card.pulse_density
         )
 
+    def _steer_gain(self, bearing_deg: float, elevation_deg: float) -> float:
+        """电子扫描损失下的**回波增益因子**（线性，[0,1]；v0.13.61）。
+
+        ``cos^指数(方位偏角) · cos^指数(俯仰偏角)``，两个偏角分别以
+        ``scan_center``（扇面法向的方位）与 ``face_elevation``（法向仰角）
+        为零点，与 AFSIM ``WsfEM_Antenna::ComputeBeamSteeringLoss`` 同口径。
+        偏角出 ±90°（背面）因子记 0——cos 为负没有物理意义，钳到 0。
+
+        指数 0（默认）恒 1，连三角函数都不进：旧想定零开销。
+        """
+        if self.ebs_exp <= 0.0:
+            return 1.0
+        az_off = radians(((bearing_deg - self.face_deg + 180.0) % 360.0) - 180.0)
+        el_off = radians(elevation_deg - self.face_elev_deg)
+        gain = 1.0
+        for off in (az_off, el_off):
+            c = cos(off)
+            # 背面/正切：cos ≤ 0 钳 0（天线面照不到的方向）。
+            gain *= max(0.0, c) ** self.ebs_exp
+        return gain
+
     def _lit_by(self, bearing_deg: float, arcs, full_circle: bool) -> bool:
         """这一拍照到 ``bearing_deg`` 没有。
 
@@ -1563,6 +1737,7 @@ class RadarSensor(Component):
         rcs_m2: float | None = None,
         *,
         jammer_noise_w: float = 0.0,
+        steer_gain: float = 1.0,
     ) -> float:
         """目标在 ``range_m``（**斜距**）处的**单脉冲**信噪比（线性）。
 
@@ -1573,8 +1748,13 @@ class RadarSensor(Component):
         走的是 ``SN = SNR/(1 + (J/S)·SNR)``，而 ``J/S = J/(SNR·N)``
         （:func:`~milsim.models.percep.equation.snr_under_jamming`）。
 
-        ★ 默认 0 时那个式子是**恒等映射**（逐位相同，不是"相差极小"），
-        所以"没挂干扰机 ⇒ 数字一个不动"有数学依据，不靠分支挡住。
+        ``steer_gain`` 是**电子扫描损失**的回波增益因子（v0.13.61，默认
+        1.0 = 不判）：乘在信号上，标定法/逐参法两条路同源——线性 SNR 上乘
+        因子与在接收功率上乘因子是同一件事。
+
+        ★ ``jammer_noise_w = 0`` 且 ``steer_gain = 1``（两者默认）时整个
+        函数是**恒等映射**（逐位相同，不是"相差极小"），所以"没挂干扰机
+        且没开 EBS ⇒ 数字一个不动"有数学依据，不靠分支挡住。
         """
         sigma = self.reference_rcs if rcs_m2 is None else rcs_m2
         if range_m <= 0.0:
@@ -1591,6 +1771,11 @@ class RadarSensor(Component):
             sn = eq.received_power(
                 self.power_w, self.gain, self.wavelength_m, sigma, range_m, self.loss
             ) / self.noise_w
+        if steer_gain != 1.0:
+            # 扫描损失吃在信号上：SNR 为 0 时乘 0 还是 0，inf 乘 0 会 nan——
+            # 零距/零噪声的发散情形不参与衰减（它们本来就不是"被探测"的数）。
+            if isfinite(sn):
+                sn *= steer_gain
         # ``sn <= 0`` 时不必（也不能）折算：``J/S`` 里那个 "∞ × 0" 会给 nan，
         # 而一个 nan 信噪比会顺着一整条链路传下去。没有信号就没有 J/S 可言。
         if jammer_noise_w <= 0.0 or sn <= 0.0:
@@ -1607,15 +1792,21 @@ class RadarSensor(Component):
         rcs_m2: float | None = None,
         *,
         jammer_noise_w: float = 0.0,
+        steer_gain: float = 1.0,
     ) -> float:
         """单次扫描的检测概率。**入口是单脉冲 SNR**（见模块头）。
+
+        ``steer_gain``（v0.13.61）与 :meth:`single_pulse_snr` 同义：电子扫描
+        损失的回波增益因子，默认 1.0 = 不判。
 
         ★ v0.13.40：按 ``swerling_case`` 分派口径——
         ``0``（默认）走**非起伏** ``nonfluctuating_pd``，``1`` 走 ``swerling1_pd``，
         ``2..5`` 目前**没有**实现（Swerling 2/3/4 要"逐脉冲起伏"与"扫描间起伏"
         的区别，属于缺口，见 §9-73）。
         """
-        snr = self.single_pulse_snr(range_m, rcs_m2, jammer_noise_w=jammer_noise_w)
+        snr = self.single_pulse_snr(
+            range_m, rcs_m2, jammer_noise_w=jammer_noise_w, steer_gain=steer_gain
+        )
         if self.swerling_case == 0:
             return eq.nonfluctuating_pd(snr, self.pulses, self.pfa)
         if self.swerling_case == 1:
@@ -1730,6 +1921,12 @@ class RadarSensor(Component):
             return EventResult.RESCHEDULE
 
         full_circle = candidates.pop()           # 哨兵：整圈时不判方位
+        # ---- 容量满员的席位分配（v0.13.62，§5.12.11）----
+        # ★ 只在容量开启时排序：排序改变候选间的随机数分配次序，默认 0 下
+        # 随机流必须逐位不动。"强者先占槽"——近的/ RCS 大的目标先判，槽位
+        # 满了以后轮到弱目标时只会被挡（见 _evaluate 里的容量门）。
+        if self.track_capacity > 0 and candidates:
+            candidates.sort(key=lambda tid: -self._rank_snr(tid, me))
         # ---- 第 7c 步：假目标 ----
         # ★ 在候选循环**之前**、且**每拍一次**：幽灵要先把槽位占上，本拍的真实
         # 检测才谈得上"被淹没"（§5.14）。反过来放会在第一拍漏掉这一层。
@@ -1737,6 +1934,54 @@ class RadarSensor(Component):
         for target_id in candidates:
             self._evaluate(engine, me, target_id, full_circle, arcs)
         self._prune()
+        return EventResult.RESCHEDULE
+
+    def _track_tick(self, engine, event) -> EventResult:
+        """专用跟踪波束：给已建航的目标插空照一次（v0.13.62，§5.12.11）。
+
+        与扫掠（:meth:`_sweep`）是**两个独立事件源**：扫掠按天线相位推进，
+        波束扫到谁才判谁；这里按 ``track_interval`` 直接"电扫"到目标——
+        调用 :meth:`_evaluate` 时传 ``full_circle=True``（空的弧表），方位门
+        因此恒过：专用波束**不依赖**天线此刻扫到哪个方位。其余的门一个不少
+        ——距离门、俯仰带（天线面的物理覆盖，电扫绕不开）、几何、方程、
+        M/N 全部照走，被专用照射"喂"的 M/N 窗口与顺路照射的是**同一个**。
+
+        波束时间预算：每个专用照射吃 ``dwell_us``，本拍可花的总额是
+        ``track_duty_max × track_interval``。装不下时按目标最近一次 Pd
+        **从强到弱**服务（:attr:`_track_pd`），轮不上的这一拍跳过——
+        它的 M/N 窗口这一拍就少一个样本，帧率自然降下来（§5.12.11 的
+        "保强弃弱"）。被跳过**不**算漏检：波束没指向它，与"没扫到"同账。
+        """
+        self._now_us = float(engine.now)
+        if not self._tracks:
+            return EventResult.RESCHEDULE
+        me = self.view.my_position()
+        if me is None:
+            return EventResult.RESCHEDULE
+        # 最近 Pd 从强到弱；没被照射过的（理论上来不到这里）按 0 排最后。
+        order = sorted(
+            self._tracks, key=lambda tid: self._track_pd.get(tid, 0.0), reverse=True
+        )
+        budget_us = self.track_duty * self._track_interval_us
+        if self.dwell_us <= 0.0 or budget_us <= 0.0:
+            # 没有可计价的驻留（无波束宽度的退化口径）：不裁——账本没单价，
+            # "裁谁"就没有依据；duty ≤ 0 的矛盾配置已在装配期拦下。
+            max_served = len(order)
+        else:
+            # ★ 整数席位：部分预算（不足一次驻留）**保底服务一个**——
+            # 宁可这一拍更新得不够准，不能一个都不更；第二个起必须
+            # 整笔预算装得下才放行（``1.08 个席位`` 不等于 2 个）。
+            max_served = max(1, int(budget_us // self.dwell_us))
+        served = 0
+        for target_id in order:
+            if not self.view.is_alive(target_id):
+                continue                       # 死目标交给 _prune 清
+            if served >= max_served:
+                self.track_skipped += 1
+                continue                       # 预算装不下：这一拍轮不到它
+            # full_circle=True + 空弧表 = "波束直接指向目标"（不过方位门）。
+            self._evaluate(engine, me, target_id, True, ())
+            served += 1
         return EventResult.RESCHEDULE
 
     def _lit_arcs(
@@ -1812,12 +2057,29 @@ class RadarSensor(Component):
         if not self._lit_by(bearing, arcs, full_circle):
             return                                  # 第 3 步：方位门
 
+        # ---- 第 3 步的第三道门：俯仰视场（v0.13.61）----
+        # 仰角带外 = 天线照不到（"没扫到"，不是"扫到了没看见"），所以与
+        # 方位门同层直接 return，不进 :attr:`geometry_blocked`。
+        # ★ 天顶/天底（水平距离为 0）按 ±90° 计——atan2(0, 0) 没有定义。
+        dz = target[2] - me[2]
+        if horizontal > 0.0:
+            elevation_deg = degrees(atan2(dz, horizontal))
+        else:
+            elevation_deg = 90.0 if dz > 0.0 else -90.0
+        if not (self.fov_el_min_deg <= elevation_deg <= self.fov_el_max_deg):
+            return                                  # 第 3 步：俯仰门
+
         # ---- 第 4 步：几何（地平线 + 地形通视，同一个调用）----
         if not self._has_line_of_sight(me, target):
             self.geometry_blocked += 1
             # 波束确实照到了它，只是什么也没收到 —— 这是**漏检**，不是"没扫到"。
             self._update_track(target_id, hit=False)
             return
+
+        # ---- 电子扫描损失（v0.13.61）：这一刻目标偏离扇面法向多少，回波
+        # 就按 cos^指数 掉多少。**在 SNR 之前**乘——标定法/逐参法两条路、
+        # 干扰的 J/S、量测误差的 SNR 全部同源地吃到这一份衰减。
+        steer = self._steer_gain(bearing, elevation_deg)
 
         # ---- 第 5~7 步：斜距 → 单脉冲 SNR → Pd ----
         # 雷达方程要的是**斜距**；航迹里的 range 沿用既有的水平距离口径。
@@ -1831,15 +2093,20 @@ class RadarSensor(Component):
         # ★ 判欺骗要先知道**未受干扰**的 SNR（``J/S`` 要它），所以这里取一次
         # 无干扰的 SNR 交给第 6 步；被干扰后的 SNR 由下面那一步自己算。
         effect = self.jamming_effect(
-            bearing, self.single_pulse_snr(slant, rcs)
+            bearing, self.single_pulse_snr(slant, rcs, steer_gain=steer)
         )
         self.jamming_w = effect.power_w
         self.jamming_range_m = effect.range_bias_m
         self.jamming_azimuth_deg = effect.azimuth_bias_deg
         if effect.power_w > 0.0:
             self.jammed_evals += 1
-        pd = self.detection_probability(slant, rcs, jammer_noise_w=effect.power_w)
+        pd = self.detection_probability(
+            slant, rcs, jammer_noise_w=effect.power_w, steer_gain=steer
+        )
         self.last_pd = pd
+        # 专用跟踪节拍的排序键（v0.13.62）：被照射就记，不管命中没有——
+        # Pd 本身就是"这个目标现在多强"的读数。
+        self._track_pd[target_id] = pd
         hit = self._rng.random() < pd
         # ---- 第 7c 步的另一半：屏幕被幽灵淹了没有 ----
         # ★ 放在 **hit 之后、_update_track 之前**：AFSIM 的原话是 "If it is
@@ -1851,6 +2118,21 @@ class RadarSensor(Component):
         if hit and self.false_targets_seen > 0 and not self._flood_passes(slant):
             hit = False
             self.jamming_blocked += 1
+        # ---- TWS 容量门（v0.13.62，§5.12.11）----
+        # ★ 与洪泛同一口径：装不下 = **没检测到**（进 M/N 窗口当一次漏检），
+        # 不是"检测到了但不建航"。只拦**新**航迹——已在席的目标不占新席位，
+        # 拦它们等于把已跟上的目标挤下去，那是撤航律（M/N）的职权。
+        # ★ 洪泛判据在前：假目标洪泛与容量满员是两本账，各有各的计数器
+        # （``jamming_blocked`` / ``capacity_blocked``），混一个数就分不清
+        # "屏幕被干扰淹了"还是"席位被真目标占满了"。
+        if (
+            hit
+            and self.track_capacity > 0
+            and target_id not in self._tracks
+            and len(self._tracks) >= self.track_capacity
+        ):
+            hit = False
+            self.capacity_blocked += 1
         if hit:
             self.detections += 1
 
@@ -1880,6 +2162,7 @@ class RadarSensor(Component):
             jammer_noise_w=effect.power_w,
             range_bias_m=effect.range_bias_m,
             azimuth_bias_deg=effect.azimuth_bias_deg,
+            steer_gain=steer,
         )
         # 非有限 σ（SNR 发散）洗成 0：没有精度可言的航迹不参与融合，
         # 走覆盖更新（与 v0.13.55 逐字同一行为）。
@@ -2089,6 +2372,9 @@ class RadarSensor(Component):
         # 速度基准也要清：实体注销后 ID 复用，不清的话新目标出生就带着
         # 旧目标的速度——第一次融合就会把位置往旧目标的航迹方向拉。
         self._last_meas.pop(target_id, None)
+        # 专用跟踪节拍的排序键同理（v0.13.62）：不清的话新目标一出生就顶着
+        # 旧目标的 Pd 排队，预算紧张时会被错误地优先服务。
+        self._track_pd.pop(target_id, None)
         if target_id in self._tracks:
             self._tracks.discard(target_id)
             self.view.drop_contact(target_id)

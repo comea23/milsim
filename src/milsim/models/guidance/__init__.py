@@ -43,7 +43,7 @@ from .contract import (
     Until,
 )
 from .asm import ASM_PHASES, AsmGuidance
-from .cruise import CRUISE_PHASES, CruiseGuidance
+from .cruise import CRUISE_PHASES, CRUISE_ROUTE_PHASES, CruiseGuidance, RouteCruiseGuidance
 
 #: 框架自带的制导件。想定里可以直接写这些注册名，不需要额外声明。
 #: **加组件只改这一处**（外加新组件自己的那个文件）。
@@ -51,6 +51,7 @@ FRAMEWORK_GUIDANCE: tuple[type, ...] = (
     AsmGuidance,
     BallisticGuidance,
     CruiseGuidance,
+    RouteCruiseGuidance,
 )
 
 __all__ = [
@@ -81,7 +82,9 @@ __all__ = [
     "BALLISTIC_PHASES",
     "BallisticGuidance",
     "CRUISE_PHASES",
+    "CRUISE_ROUTE_PHASES",
     "CruiseGuidance",
+    "RouteCruiseGuidance",
     # -- 清单 --
     "FRAMEWORK_GUIDANCE",
 ]

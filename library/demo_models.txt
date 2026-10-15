@@ -52,6 +52,55 @@ component_type RADAR_AA_1 : HEX_SEARCH_RADAR
     fov           60 deg
 end_component_type
 
+# AN/SPY-1D 与 AN/SPY-6(V)1：舰载相控阵**单扇面**型号。一台四阵面军舰
+# = 同平台挂 4 个 sensor，各自写 scan_center（45/135/225/315°——基准朝向
+# 属于挂载，不属于型号）。
+#
+# 斜视衰减的物理：平面阵投影孔径 cos⁴ 律，指数 4 时 45° 偏角掉
+# 40·lg(cos45°) = 6.02 dB ⇒ 探测距离 ×cos45° ≈ 0.707。
+# SPY-1D"法线 410 km / ±45° 290 km"（290/410 = 0.7073）与它解析吻合，
+# 所以指数直接取 4，不拟合。
+component_type RADAR_SPY_1D : HEX_SEARCH_RADAR
+    note   "AN/SPY-1D 舰载多功能相控阵（单扇面，S 波段 PESA）"
+    source "用户提供规格（2026-10）：3.1-3.5 GHz、峰值 6 MW、四阵面 360°、俯仰 2-80°、RCS 0.1 m² 法线 410 km / ±45° 290 km。频率取带中点 3.3 GHz；detect_range/reference_rcs 即 410 km@0.1 m²；ebs_loss_exponent=4 由 290/410=cos45° 反推（解析一致非拟合）；scan_interval 公开资料未给，取 2 s 占位（想定可覆写）"
+    detect_range       410 km
+    reference_rcs      0.1 m2
+    frequency          3.3 GHz
+    scan_interval      2 s
+    fov                90 deg
+    scan_center        0 deg
+    fov_el_min         2 deg
+    fov_el_max         80 deg
+    ebs_loss_exponent  4.0
+    attr
+        peak_power_raw      "6 MW"
+        frequency_raw       "3.1-3.5 GHz"
+        coverage_raw        "方位 360°（4×90° 固定扇面），俯仰 2-80°"
+        detect_463km_note   "标称探测 463 km（公开资料口径，对应 RCS 未注明，留作原始记录不入模型参数）"
+        steering_raw        "PESA，四阵面固定，电扫 ±45°"
+    end_attr
+end_component_type
+
+component_type RADAR_SPY_6V1 : HEX_SEARCH_RADAR
+    note   "AN/SPY-6(V)1 舰载 AESA 相控阵（单扇面，AMDR-S，37 RMA/面）"
+    source "公开资料（2026-10 检索）：灵敏度较 SPY-1D +15 dB（30×，RF Essentials/人民网）；'半尺寸目标 2 倍距离'（Military Aerospace/齐鲁壹点，⇒ +12.02 dB）。取后一口径（更保守且双源一致）：0.05 m²@820 km ⇒ 折算 0.1 m²@820 km（RCS^(1/4) 缩放）。俯仰带公开资料未给，沿用 SPY-1D 的 2-80°（同构假设）；四固定阵面斜视衰减同构，指数取 4；scan_interval 占位 2 s"
+    detect_range       820 km
+    reference_rcs      0.1 m2
+    frequency          3.3 GHz
+    scan_interval      2 s
+    fov                90 deg
+    scan_center        0 deg
+    fov_el_min         2 deg
+    fov_el_max         80 deg
+    ebs_loss_exponent  4.0
+    attr
+        aperture_raw        "14×14 ft/面，37 RMA（V)1），天线直径 4.3 m"
+        sensitivity_raw     "较 AN/SPY-1D +15 dB（30×）官方口径 / +12 dB（半尺寸@2×距离）操作口径"
+        bmd_range_raw       "弹道导弹类目标 1000 km 级（公开宣称）"
+        coverage_raw        "方位 360°（4×90° 固定扇面）"
+    end_attr
+end_component_type
+
 # ---- 机动 ---------------------------------------------------------------
 #
 # GROUND_MOVER 是框架的参考实现（milsim/models/mover.py，§5.7）。

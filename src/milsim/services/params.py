@@ -149,6 +149,11 @@ class ParamKind(IntEnum):
     #: 系统只保证"是一个非空的、带名字的阶段序列"——量纲与取值范围的校验
     #: 在组件侧，因为只有它知道每个字段是什么意思。
     PHASES = 6
+    #: **数值序列**——一行里写一串数（如弹的途经点 ``route x1 y1 x2 y2``）。
+    #:
+    #: 与 ``PHASES`` 同一条理由：元素是标量但**个数与含义由组件定义**，参数
+    #: 系统只保证"是一串数"；两两成对、坐标基准这些语义校验在组件侧。
+    NUMBERS = 7
 
 
 #: 每个量纲的**基本单位**。无单位的值按它处理。
@@ -375,6 +380,9 @@ class ParamSpec:
         if self.kind is ParamKind.PHASES:
             return self._convert_phases(value, where)
 
+        if self.kind is ParamKind.NUMBERS:
+            return self._convert_numbers(value, where)
+
         if self.kind is ParamKind.COORD:
             if not isinstance(value, CoordValue):
                 raise ParamError(f"{where}: 需要坐标，收到 {value!r}")
@@ -425,6 +433,20 @@ class ParamSpec:
                 raise ParamError(f"{where}: 列表元素必须是字符串，收到 {item!r}")
             self._check_choices(item, where)
         return items
+
+    def _convert_numbers(self, value: Any, where: str) -> tuple[float, ...]:
+        """数值序列：一行多值（``route 1 2 3 4`` 由语法层给成元组）。
+
+        只挡两种一眼能看出的错：不是序列、元素不是数（含 ``true``——
+        bool 是 int 的子类，不排除的话会被当成 1 静默混进来）。**奇偶与
+        语义不在这里查**：只有用它的组件知道这串数该两两成对还是别的形状。
+        """
+        if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+            raise ParamError(f"{where}: 需要数值序列，收到 {value!r}")
+        for item in value:
+            if isinstance(item, bool) or not isinstance(item, (int, float)):
+                raise ParamError(f"{where}: 序列元素必须是数值，收到 {item!r}")
+        return tuple(float(item) for item in value)
 
     def _convert_phases(self, value: Any, where: str) -> tuple[Any, ...]:
         """阶段表：非空、每个元素带名字。
@@ -647,6 +669,14 @@ class Params:
         要 dBW 请在剧本/文档里换算成瓦再写。
         """
         return _quantity(ParamKind.NUMBER, Dimension.POWER, default, **kw)
+
+    @staticmethod
+    def numbers(default: Sequence[float] = (), **kw: Any) -> ParamSpec:
+        """数值序列（``route x1 y1 x2 y2`` 这类"一行一串数"）。
+
+        个数与语义由用它的组件定义——参数系统只保证"是一串数"。
+        """
+        return ParamSpec(ParamKind.NUMBERS, Dimension.NONE, tuple(default), **kw)
 
     @staticmethod
     def phases(default: Sequence[Any] = (), **kw: Any) -> ParamSpec:

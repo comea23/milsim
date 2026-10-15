@@ -168,7 +168,9 @@ class _Certain(HexSearchRadar):
     这一族用例量到的仍然是 v0.13.24 那套语义（照到即建航）。
     """
 
-    def detection_probability(self, range_m, m2=None, *, jammer_noise_w=0.0):
+    def detection_probability(
+        self, range_m, m2=None, *, jammer_noise_w=0.0, steer_gain=1.0
+    ):
         return 1.0
 
 

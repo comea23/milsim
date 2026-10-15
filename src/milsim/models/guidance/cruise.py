@@ -71,11 +71,14 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from ...services.params import Params
 from ...services.type_registry import register_component
 from .base import GuidanceComputer
 from .contract import (
     HORIZ_PN,
+    HORIZ_ROUTE,
     HORIZ_TARGET,
     VERT_PN,
     Phase,
@@ -133,4 +136,33 @@ class CruiseGuidance(GuidanceComputer):
     }
 
 
-__all__ = ["CRUISE_PHASES", "CruiseGuidance"]
+#: 途径点巡航弹的阶段表（v0.13.63）：与 :data:`CRUISE_PHASES` 唯一的差别是
+#: 巡航段水平律 ``target`` → ``route``。途径点序列写在制导件的 ``route``
+#: 参数里（想定里直接在 guidance 组件块赋值），按序飞完后**自动转回追踪
+#: 目标**——所以目标、引信、末段导引都与 :class:`CruiseGuidance` 共用，
+#: 不用换弹体，也不用改任何别的参数。
+CRUISE_ROUTE_PHASES: tuple[Phase, ...] = (
+    CRUISE_PHASES[0],
+    replace(CRUISE_PHASES[1], horizontal=HORIZ_ROUTE),
+    CRUISE_PHASES[2],
+)
+
+
+@register_component("ROUTE_CRUISE_GUIDANCE")
+class RouteCruiseGuidance(CruiseGuidance):
+    """途径点巡航弹：发射 → 沿 ``route`` 途径点贴地巡航 → 末段比例导引。
+
+    与 :class:`CruiseGuidance` 只差默认表里那一个水平律。``route`` 留空会在
+    装配期报错（基类初始化的检查）；途径点的几何语义（半径内算过点、
+    转弯受过载限制）见 :data:`~milsim.models.guidance.contract.HORIZ_ROUTE`。
+    """
+
+    __slots__ = ()
+
+    PARAMS = {
+        **CruiseGuidance.PARAMS,
+        "phases": Params.phases(CRUISE_ROUTE_PHASES),
+    }
+
+
+__all__ = ["CRUISE_PHASES", "CRUISE_ROUTE_PHASES", "CruiseGuidance", "RouteCruiseGuidance"]

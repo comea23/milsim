@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 
+import math
 import random
 
 import pytest
@@ -112,15 +113,18 @@ class _Spec(dict):
 class _Engine:
     def __init__(self) -> None:
         self.now = 0
-        self.beat = None
+        # ★ v0.13.62 起雷达有两个周期事件源（扫掠 + 专用跟踪节拍），桩改成
+        # 列表逐个敲——调用次序 = 注册次序，与"同刻按注册先后排队"等价。
+        self.beats: list[tuple[int, object]] = []
 
     def schedule_recurring(self, delay, interval, fn, priority=0):
-        self.beat = (interval, fn)
+        self.beats.append((interval, fn))
         return None
 
     def tick_to(self, seconds: float) -> None:
         self.now = int(round(seconds * 1_000_000))
-        self.beat[1](self, None)
+        for _, fn in self.beats:
+            fn(self, None)
 
 
 class _Streams:
@@ -187,7 +191,9 @@ class _ForcedPd(HexSearchRadar):
 
     forced_pd = 1.0
 
-    def detection_probability(self, range_m, rcs_m2=None, *, jammer_noise_w=0.0):
+    def detection_probability(
+        self, range_m, rcs_m2=None, *, jammer_noise_w=0.0, steer_gain=1.0
+    ):
         return self.forced_pd
 
 
@@ -3391,3 +3397,253 @@ def test_a_jammer_without_aim_at_keeps_the_old_isotropic_behaviour() -> None:
         assert threats[0].antenna_off_deg is None
         assert threats[0].beam_width_deg == spec.beam_width_deg
         assert jam.aimed == 0 and jam.aim_failed == 0   # 一次航迹都没查
+
+
+# ---------------------------------------------------------------------------
+# v0.13.61：俯仰视场 + 电子扫描损失（EBS）
+# ---------------------------------------------------------------------------
+
+
+def test_elevation_fov_gate_blocks_out_of_band_targets() -> None:
+    """俯仰视场是**第三道扫描门**：仰角带外 = 没扫到，与方位门同层。
+
+    "俯仰 2-80°"口径：贴海目标（仰角 0°）照不到，带内的照得到，
+    高出上界的也照不到。目标在 10.39 km（_EAST）：z=1 km ⇒ 仰角 ≈5.5°
+    （带内）、z=20 km ⇒ ≈62.6°（带内）、z=80 km ⇒ ≈82.6°（带外）。
+    仰角门排在几何之前，所以 ``geometry_blocked`` 不该动。
+    """
+    _ForcedPd.forced_pd = 1.0
+
+    def _at_altitude(z: float):
+        radar, engine, store = _build(
+            cls=_ForcedPd,
+            fov_el_min=2.0,
+            fov_el_max=80.0,
+            entities=((1, *_EAST),),
+            **_INSTANT_TRACK,
+        )
+        x, y, _ = store.position_of(1)
+        store.set_pose(1, x, y, z)
+        engine.tick_to(1.0)
+        return radar
+
+    assert _at_altitude(0.0).contacts_seen == []       # 0° < 2°：带外
+    assert _at_altitude(1_000.0).contacts_seen == [1]  # ≈5.5°：带内
+    assert _at_altitude(20_000.0).contacts_seen == [1]  # ≈62.6°：带内
+    above = _at_altitude(80_000.0)                      # ≈82.6° > 80°：带外
+    assert above.contacts_seen == []
+    assert above.geometry_blocked == 0, "带外是'没扫到'，不是'被遮挡'"
+
+
+def test_steer_gain_math_matches_afsim_cos_exponent() -> None:
+    """EBS 因子 = ``cos^指数(方位偏)·cos^指数(俯仰偏)``，与 AFSIM 同式。"""
+    radar, _, _ = _build(ebs_loss_exponent=4.0)
+    assert radar._steer_gain(0.0, 0.0) == pytest.approx(1.0)       # 法向上无损失
+    assert radar._steer_gain(45.0, 0.0) == pytest.approx(0.25)     # cos⁴45° = ¼
+    assert radar._steer_gain(45.0, 45.0) == pytest.approx(0.0625)  # 两轴都偏 45°
+    assert radar._steer_gain(135.0, 0.0) == 0.0                    # 背面：照不到
+    # 指数 0（默认）恒 1——连偏角多大都不看。
+    off, _, _ = _build()
+    assert off._steer_gain(135.0, 0.0) == 1.0
+    # 基准俯仰 ≠ 0：偏角的零点跟着天线面走（目标在法向上 ⇒ 无损失）。
+    tilted, _, _ = _build(ebs_loss_exponent=4.0, face_elevation=30.0)
+    assert tilted._steer_gain(0.0, 30.0) == pytest.approx(1.0)
+
+
+def test_ebs_exponent4_replicates_spy1d_falloff() -> None:
+    """★ 指数 4 的 EBS **解析复现** AN/SPY-1D 的斜视衰减：
+    法线 410 km ↔ ±45° 290 km（290/410 = 0.7073 = cos45°）。
+
+    标定法雷达（``detect_range`` 即参考 RCS 下的标称距离）：同一目标在
+    290 km、偏角 45° 的 SNR 应当等于它在 410 km、法向上的 SNR——两次
+    探测是同一个 Pd。这不是拟合，是平面阵投影孔径的 cos⁴ 律。
+    """
+    radar, _, _ = _build(
+        detect_range=410_000.0, reference_rcs=0.1, ebs_loss_exponent=4.0
+    )
+    on_axis = radar.single_pulse_snr(410_000.0, 0.1)
+    off_axis = radar.single_pulse_snr(
+        410_000.0 * math.cos(math.radians(45.0)),
+        0.1,
+        steer_gain=radar._steer_gain(45.0, 0.0),
+    )
+    assert off_axis == pytest.approx(on_axis, rel=1e-12)
+
+
+def test_ebs_wired_through_the_evaluation() -> None:
+    """EBS 因子在 ``_evaluate`` 里接进了 SNR 链：``last_pd`` 应当与
+    "同一距离、手工乘同一个因子"的 Pd 一致，且比无损失的 Pd 低。
+
+    圆周扫描（默认 fov=360）下 ``scan_center`` 是相位零点，EBS 的方位
+    偏角零点也取它：目标在正东 90°，``scan_center=45°`` ⇒ 偏角 45°，
+    因子 = cos⁴45° = 0.25。``detect_range`` 压到 12 km 让两个 Pd 拉开。
+    """
+    common = dict(entities=((1, *_EAST),), detect_range=12_000.0)
+    wired, engine, _ = _build(
+        scan_center=45.0, ebs_loss_exponent=4.0, **common, **_INSTANT_TRACK
+    )
+    plain, engine2, store = _build(**common, **_INSTANT_TRACK)
+    engine.tick_to(1.0)     # 一拍 180°：正东目标落在第一拍的弧里
+    engine2.tick_to(1.0)
+    x1, y1, z1 = store.position_of(1)
+    me = store.position_of(0)
+    slant = math.sqrt((x1 - me[0]) ** 2 + (y1 - me[1]) ** 2 + (z1 - me[2]) ** 2)
+    steer = math.cos(math.radians(45.0)) ** 4
+    expected = plain.detection_probability(slant, plain.reference_rcs,
+                                           steer_gain=steer)
+    assert wired.last_pd == pytest.approx(expected, rel=1e-9)
+    assert wired.last_pd < plain.last_pd - 1e-6
+
+
+# ===========================================================================
+# 第 8b 步：TWS 容量 + 专用跟踪波束（v0.13.62，§5.12.11）
+# ===========================================================================
+
+
+class _SpyRank(HexSearchRadar):
+    """给 ``_rank_snr`` 装计数器的雷达——守"默认路径零扰动"用。"""
+
+    calls = 0
+
+    def _rank_snr(self, target_id, me):
+        type(self).calls += 1
+        return super()._rank_snr(target_id, me)
+
+
+def test_rank_sort_only_when_capacity_enabled() -> None:
+    """候选按粗 SNR 排序**只在容量开启时发生**：容量 0（默认）一次都不排。
+
+    排序会改变候选间的随机数分配次序——"旧行为逐字不变"不是靠结果恰好
+    相同兜出来的，是靠"默认路径根本不进排序"保证的。
+    """
+    common = dict(entities=((1, *_EAST),), detect_range=12_000.0, **_INSTANT_TRACK)
+    off, engine, _ = _build(cls=_SpyRank, **common)
+    engine.tick_to(1.0)
+    assert _SpyRank.calls == 0
+    _SpyRank.calls = 0
+    on, engine2, _ = _build(cls=_SpyRank, track_capacity=2, **common)
+    engine2.tick_to(1.0)
+    assert _SpyRank.calls >= 1
+
+
+def test_track_capacity_blocks_new_tracks_when_full() -> None:
+    """容量 1、两个目标同拍命中：只建一条，另一条按"没检测到"记账。
+
+    近的目标（环 3）SNR 强、先判先占席；被挡的那次要进 M/N 窗口当漏检
+    （与洪泛同一口径），``capacity_blocked`` 单独记——"席位被占满"与
+    "屏幕被干扰淹没"是两本账。
+    """
+    radar, engine, store = _build(
+        entities=((1, *_EAST), (2, 3, 0)),
+        detect_range=12_000.0,
+        scan_interval=1_000_000,       # 一拍一整圈：两个目标每拍都被照到
+        track_capacity=1,
+        **_INSTANT_TRACK,
+    )
+    engine.tick_to(1.0)
+    assert radar._tracks == {2}
+    assert radar.capacity_blocked == 1
+    assert len(store.contacts_of(0)) == 1
+    # 没占到席的目标 1：窗口里记的是漏检（False），下一拍它仍建不上航。
+    assert radar._hits[1].count(False) >= 1
+    engine.tick_to(2.0)
+    assert len(radar._tracks) == 1
+    assert radar.capacity_blocked == 2
+
+
+def test_track_capacity_gives_the_stronger_target_the_slot() -> None:
+    """容量 1、一近一远同拍命中：席位归 SNR 强的（先近后远）。
+
+    排序键是粗 SNR（:meth:`_rank_snr`）：同样的 RCS 下距离近者强。
+    """
+    radar, engine, store = _build(
+        entities=((1, 3, 0), (2, *_EAST)),       # 1 近（环 3）、2 远（环 6）
+        detect_range=12_000.0,
+        scan_interval=1_000_000,
+        track_capacity=1,
+        **_INSTANT_TRACK,
+    )
+    engine.tick_to(1.0)
+    assert radar._tracks == {1}
+    assert len(store.contacts_of(0)) == 1
+    assert radar.capacity_blocked == 1
+
+
+def test_dedicated_track_beam_revisits_without_azimuth_gate() -> None:
+    """专用跟踪波束：已建航的目标按 track_interval 被"电扫"回访，
+    **不依赖**天线相位扫到它（方位门恒过），M/N 窗口与顺路照射共用。
+
+    几何要让"顺路"与"专用"分得开：扇扫 90° 朝 100°、1 s 转四分之一圈
+    （``scan_interval=4 s``）。t=1s 一拍 90° = 整片视场，正东 90° 的目标
+    被照到、建航；t=1.25s 扫掠只走过 [100°,122.5°]，照不到它——但专用
+    节拍（0.25 s）照了：``detected_at`` 跟着专用节拍走，就是方位门被绕过
+    的直接证据。
+    """
+    radar, engine, store = _build(
+        entities=((1, *_EAST),),
+        detect_range=12_000.0,
+        fov=90.0,
+        scan_center=100.0,
+        scan_interval=4_000_000,
+        track_interval=250_000,
+        **_INSTANT_TRACK,
+    )
+    engine.tick_to(1.0)      # 一拍 90°：走过整片视场（两端都到过），建航
+    assert radar._tracks == {1}
+    assert next(c for c in store.contacts_of(0) if c.target_id == 1).detected_at \
+        == 1_000_000
+    engine.tick_to(1.25)     # 扫掠弧 [100°,122.5°] 照不到 90°；专用节拍照到
+    assert next(c for c in store.contacts_of(0) if c.target_id == 1).detected_at \
+        == 1_250_000
+    engine.tick_to(1.5)
+    assert next(c for c in store.contacts_of(0) if c.target_id == 1).detected_at \
+        == 1_500_000
+    assert radar.track_skipped == 0      # 占空比默认 1.0：预算不裁
+
+
+def test_track_beam_respects_the_duty_budget() -> None:
+    """占空比账本：预算只够照一个，Pd 强的先被服务，弱的这一拍跳过。
+
+    ``dwell = beam_width×scan_interval/360 = 10×10⁶/360 ≈ 27778 µs``；
+    ``budget = 0.12×250_000 = 30_000 µs`` ⇒ 每拍只服务 1 个目标。
+    排序键 ``_track_pd`` 直接预置（文档口径：目标最近一次 Pd）——把
+    "排序对不对"从"Pd 桩 + 随机流"里摘出来单测。三个目标摆成 90°/150°/
+    270°（环 6 的三个格心），t=1.25s 的扫掠弧 [−5°,95°] 只照到 90° 那个，
+    另两个的航迹 ``detected_at`` 停在上一拍。
+    """
+    radar, engine, store = _build(
+        entities=((1, 3, 0), (2, 0, 6), (3, -6, 0)),
+        detect_range=12_000.0,
+        scan_interval=1_000_000,
+        beam_width=10.0,
+        track_capacity=3,
+        track_interval=250_000,
+        track_duty_max=0.12,
+        **_INSTANT_TRACK,
+    )
+    engine.tick_to(1.0)      # 一拍 360°：三个都照到、都命中（pd=1.0 桩）
+    assert radar._tracks == {1, 2, 3}
+    # ★ 桩逐拍敲**所有**事件源，t=1.0 那拍专用节拍已经跑过一次（按真实 Pd
+    # 排序、同样只服务 1 个）。这里把排序键换成预置值、计数清零，从下一拍
+    # 起量**纯增量**。
+    radar._track_pd.update({1: 0.9, 2: 0.4, 3: 0.1})
+    radar.track_skipped = 0
+    engine.tick_to(1.25)     # 专用节拍：预算只够 1 个 ⇒ 服务 Pd 最强的目标 1
+    assert radar.track_skipped == 2
+    assert next(c for c in store.contacts_of(0) if c.target_id == 1).detected_at \
+        == 1_250_000
+    assert next(c for c in store.contacts_of(0) if c.target_id == 2).detected_at \
+        == 1_000_000         # 目标 2 这拍没被刷新（扫掠弧也没照到它）
+    engine.tick_to(1.5)
+    assert radar.track_skipped == 4
+
+
+def test_track_beam_with_zero_duty_is_a_configuration_error() -> None:
+    """``track_interval > 0`` 而 ``track_duty_max ≤ 0``：装配期报错。
+
+    "开了专用波束却一分时间都不给"是自相矛盾的配置，静默跑成
+    "永远不更新"比当场报错难看得多（半给不行）。
+    """
+    with pytest.raises(ConfigurationError, match="track_duty_max"):
+        _build(track_interval=250_000, track_duty_max=0.0)
+

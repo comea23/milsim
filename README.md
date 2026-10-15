@@ -12,8 +12,8 @@
 ### 功能特性
 
 - **离散事件引擎**：固定步长 + 事件队列 + 消息收件箱，支持批量并行推演（`services/orchestrator`）
-- **运载器**：空中 / 地面（轮式、履带）/ 水面 / 水下 / 导弹（弹道、巡航、反舰，带制导件）
-- **雷达探测**：雷达方程 → SNR → Pd（Swerling 起伏 + Marcum Q）、波束扫描相位制、地平线与通视判决、航迹管理（M/N 建航）、按精度逆方差加权融合（σ 收缩）
+- **运载器**：空中 / 地面（轮式、履带）/ 水面 / 水下 / 导弹（弹道、巡航、反舰，带制导件）；巡航弹支持途径点航线（`ROUTE_CRUISE_GUIDANCE` + `route` 参数，按序过点后自动转末段导引）
+- **雷达探测**：雷达方程 → SNR → Pd（Swerling 起伏 + Marcum Q）、波束扫描相位制、地平线与通视判决、航迹管理（M/N 建航）、按精度逆方差加权融合（σ 收缩）、俯仰视场与电子扫描损失（相控阵斜视衰减，内置 AN/SPY-1D / SPY-6(V)1 型号）、TWS 航迹容量与专用跟踪波束（电扫回访 + 波束时间账本，跟踪帧率与搜索解耦）
 - **通信网**：多网络组网、链路判通（SNR 判据）、航迹报文分发、掉线与延迟
 - **电子战**：压制干扰（S/(N+J) 判据、极化失配）、干扰守门与被压标注
 - **决策**：规则决策器 + LLM 决策器（可接任意 OpenAI 兼容接口），任务编排（Task / Intent / Ledger）
@@ -139,8 +139,8 @@ python tools/serve_replay.py ...
 ### Features
 
 - **Discrete-event engine**: fixed time step + event queue + message inboxes; batch parallel runs via the orchestrator
-- **Movers**: air, ground (wheeled / tracked), surface, subsurface, and missiles (ballistic, cruise, anti-ship, with guidance components)
-- **Radar detection**: radar equation → SNR → Pd (Swerling fluctuations + Marcum Q), phase-based beam sweep, horizon and line-of-sight tests, track management (M/N criteria), accuracy-weighted track fusion (inverse-variance, σ shrinkage)
+- **Movers**: air, ground (wheeled / tracked), surface, subsurface, and missiles (ballistic, cruise, anti-ship, with guidance components); cruise missiles fly waypoint routes (`ROUTE_CRUISE_GUIDANCE` + `route` param, auto hand-over to terminal guidance after the last waypoint)
+- **Radar detection**: radar equation → SNR → Pd (Swerling fluctuations + Marcum Q), phase-based beam sweep, horizon and line-of-sight tests, track management (M/N criteria), accuracy-weighted track fusion (inverse-variance, σ shrinkage), elevation field of view and electronic scan loss (phased-array off-boresight falloff, with AN/SPY-1D / SPY-6(V)1 model entries), TWS track capacity and dedicated track beam (electronically-steered revisit with a beam-time ledger, decoupling track rate from search)
 - **Communication networks**: multi-net composition, link budget (SNR criterion), track-message dissemination, dropouts and latency
 - **Electronic warfare**: stand-in jamming with the S/(N+J) criterion and polarization mismatch, jam gating and suppressed-radar annotation
 - **Decision**: rule-based and LLM planners (any OpenAI-compatible endpoint), task orchestration (Task / Intent / Ledger)

@@ -39,6 +39,7 @@ from milsim.models.guidance import (
 from milsim.models.guidance.contract import (
     HORIZ_HOLD,
     HORIZ_PN,
+    HORIZ_ROUTE,
     HORIZ_TARGET,
     VERT_BALANCE,
     VERT_FPA,
@@ -1105,3 +1106,135 @@ def test_missile_is_registered_under_its_type_name() -> None:
     assert factory.resolve_class("MISSILE_MOVER") is MissileMover
     for name in ("ASM_GUIDANCE", "CRUISE_GUIDANCE", "BALLISTIC_GUIDANCE"):
         assert issubclass(factory.resolve_class(name), GuidanceComputer)
+
+
+# ===========================================================================
+# 途径点（v0.13.63，§5.8 的 route 水平律）
+# ===========================================================================
+
+def test_route_law_steers_toward_the_active_waypoint() -> None:
+    """route 律指向**当前**途径点：点在东边就右转；进半径自动换下一个。
+
+    单元口径：不飞，直接喂状态——把"指向哪个点"与"换没换点"两件事
+    从弹道积分里摘出来单测。
+    """
+    guidance = build(
+        CRUISE_BODY, guidance_type="CRUISE_GUIDANCE",
+        guidance_params={
+            "phases": (Phase("GO", horizontal=HORIZ_ROUTE),),
+            "route": (10_000.0, 0.0, 10_000.0, -40_000.0),
+            "waypoint_radius": 500.0,
+        },
+        target=(0.0, -80_000.0, 0.0),
+    ).guidance
+    # 弹在原点朝北，第一个点在正东 ⇒ 右转（横向加速度为正）。
+    assert guidance.command(_seek_state(z=100.0)).lateral_accel > 0.0
+    assert guidance.waypoint_index() == 0
+    # 挪进第一个点的半径内：这一步先切点（index → 1），再指向第二个点。
+    # 第二个点在 (10000, -40000)，从 (9700, 0) 看几乎正前，但仍有 300 m
+    # 横偏 ⇒ 指令 = 1/秒 × 200 m/s × radians(0.43°) ≈ 1.5 m/s²，很小但不为零。
+    state = replace(_seek_state(z=100.0), x=9_700.0, y=0.0)
+    cmd = guidance.command(state)
+    assert guidance.waypoint_index() == 1
+    assert abs(cmd.lateral_accel) < 2.5
+    # 再挪进第二个点的半径内：点全走完 ⇒ 退化成追踪目标。
+    # 目标 (0, -80000) 在左后方 ⇒ 左转（横向加速度为负）。
+    state = replace(_seek_state(z=100.0), x=9_700.0, y=-40_000.0)
+    cmd = guidance.command(state)
+    assert guidance.waypoint_index() == 2
+    assert cmd.lateral_accel < 0.0
+
+
+def test_route_exhausted_matches_the_target_law_exactly() -> None:
+    """途径点走完后的指令必须与 HORIZ_TARGET **逐位相同**。
+
+    "退化成追踪目标"不是近似：两条路走的是同一套公式（wrap180 + 追踪律），
+    差一位就是两套实现。
+    """
+    route = build(
+        CRUISE_BODY, guidance_type="CRUISE_GUIDANCE",
+        guidance_params={
+            "phases": (Phase("GO", horizontal=HORIZ_ROUTE),),
+            "route": (1.0, 0.0),                  # 原点旁边 ⇒ 第一口就吃掉
+            "waypoint_radius": 500.0,
+        },
+        target=(2_000.0, -20_000.0, 0.0),
+    ).guidance
+    plain = build(
+        CRUISE_BODY, guidance_type="CRUISE_GUIDANCE",
+        guidance_params={"phases": (_seek_phase(HORIZ_TARGET),),
+                         "target_name": TARGET_NAME},
+        target=(2_000.0, -20_000.0, 0.0),
+    ).guidance
+    state = _seek_state(z=100.0)
+    lateral = route.command(state).lateral_accel  # 第一口就把点吃掉（1 m 远）
+    assert route.waypoint_index() == 1            # 先证明确实走完了
+    assert lateral == plain.command(state).lateral_accel
+
+
+def test_odd_route_length_is_rejected() -> None:
+    """route 是坐标对序列：奇数个 = 有人少写了一个坐标，装配期报错。"""
+    with pytest.raises(ConfigurationError, match="route"):
+        build(CRUISE_BODY, guidance_type="CRUISE_GUIDANCE",
+              guidance_params={"phases": (Phase("GO", horizontal=HORIZ_ROUTE),),
+                               "route": (1.0, 2.0, 3.0)},
+              target=(0.0, -80_000.0, 0.0))
+
+
+def test_route_law_without_route_is_rejected() -> None:
+    """有阶段用 route 导引但 route 参数为空：装配期报错，不静默直飞。"""
+    with pytest.raises(ConfigurationError, match="route"):
+        build(CRUISE_BODY, guidance_type="CRUISE_GUIDANCE",
+              guidance_params={"phases": (Phase("GO", horizontal=HORIZ_ROUTE),)},
+              target=(0.0, -80_000.0, 0.0))
+
+
+#: 途径点想定的剧本：发射保持航向 → 巡航沿点飞 → 末段比例导引。
+#: 与 CRUISE_PHASES 唯一的差别是巡航段的水平律（target → route）。
+WAYPOINT_PHASES = (
+    Phase(
+        "LAUNCH",
+        until=Until.above("altitude_agl", 130.0),
+        altitude=150.0, altitude_agl=True, speed=240.0,
+    ),
+    Phase(
+        "CRUISE",
+        until=Until.below("range", 20_000.0),
+        altitude=50.0, altitude_agl=True, speed=240.0,
+        horizontal=HORIZ_ROUTE,
+    ),
+    Phase("TERMINAL", vertical=VERT_PN, horizontal=HORIZ_PN, gain=4.0,
+          max_accel=30.0),
+)
+
+
+def test_cruise_missile_passes_waypoints_in_order_and_still_hits() -> None:
+    """端到端：巡航弹先绕东边两个途径点，再打正北 120 km 的目标。
+
+    轨迹证据是**按序过点**：全程采样里到每个点的最近距离都在
+    ``waypoint_radius + 一帧位移``（240 m/s × 2 s = 480 m，切点判据落在
+    子步上，帧边界最远差这么多）以内，且第一个点的过点时刻早于第二个。
+    末段精度不受影响：仍判"命中"。
+    """
+    rig = build(
+        CRUISE_BODY, guidance_type="CRUISE_GUIDANCE",
+        guidance_params={
+            "phases": WAYPOINT_PHASES,
+            "route": (60_000.0, -50_000.0, 20_000.0, -85_000.0),
+            "waypoint_radius": 2_500.0,
+        },
+        target=(0.0, -120_000.0, 0.0),
+    )
+    rig.fly(frames=4_000)
+    assert rig.guidance.hit()
+    assert rig.guidance.waypoint_index() == 2
+
+    waypoints = rig.guidance.waypoints()
+    bound = 2_500.0 + 480.0
+    order: list[int] = []
+    for wx, wy in waypoints:
+        gaps = [hypot(px - wx, py - wy) for px, py, _z in rig.view.track]
+        best = min(gaps)
+        assert best <= bound, f"途径点 ({wx:g}, {wy:g}) 最近 {best:.0f} m"
+        order.append(gaps.index(best))
+    assert order[0] < order[1], "必须先过第一个点再过第二个点"

@@ -116,11 +116,19 @@ HORIZ_HOLD = "hold"
 HORIZ_TARGET = "target"
 #: 比例导引：``a = N·Vc·λ̇``。对付机动目标的正解，末段用它。
 HORIZ_PN = "pn"
+#: 沿途径点飞行（v0.13.63）：指向**当前途径点**，进入 ``waypoint_radius``
+#: 就切下一个；走完全部途径点后退化成追踪目标（与 ``HORIZ_TARGET`` 同律）。
+#: 途径点表本身是制导件的 ``route`` 参数，**跨阶段共享**（发射段
+#: ``HORIZ_HOLD`` 不切点，巡航段切）。转弯受阶段/弹体过载上限约束，
+#: 所以"过点"是"进半径"而不是"精确踩中"——点距太近、半径太大时
+#: 弹会画圆够不着，那是想定的事，不是模型的错。
+HORIZ_ROUTE = "route"
 
 HORIZONTAL_LAWS: tuple[str, ...] = (
     HORIZ_HOLD,
     HORIZ_TARGET,
     HORIZ_PN,
+    HORIZ_ROUTE,
 )
 
 # ---------------------------------------------------------------------------
@@ -499,6 +507,7 @@ def gravity() -> float:
 __all__ = [
     "HORIZ_HOLD",
     "HORIZ_PN",
+    "HORIZ_ROUTE",
     "HORIZ_TARGET",
     "HORIZONTAL_LAWS",
     "SPEED_EPS",

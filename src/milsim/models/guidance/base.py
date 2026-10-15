@@ -44,6 +44,7 @@ from ..component import Component
 from .contract import (
     HORIZ_HOLD,
     HORIZ_PN,
+    HORIZ_ROUTE,
     HORIZ_TARGET,
     FlightState,
     GuidanceCommand,
@@ -104,6 +105,14 @@ class GuidanceComputer(Component):
         #: 兜底：飞这么久还没命中/落地就判"失的"。它不是模型参数，
         #: 是一道**防跑飞**的闸——没有它的表现是推演永远跑不完。
         "max_flight_time": Params.duration(10_800_000_000, minimum=1),
+        #: **途径点序列**（v0.13.63，平面坐标 ``x1 y1 x2 y2 …``，米）。
+        #: 阶段配 ``horizontal=route`` 时按序飞行，走完交回目标。高度不归它：
+        #: 垂向仍由阶段剧本管（巡航段贴地跟随、途径点不带 z）。
+        #: 留空 + 没有 route 阶段 = 旧弹，逐字不变。
+        "route": Params.numbers(()),
+        #: 离途径点多近算"过了"（米）。途径点是**方向依据**不是必踩点——
+        #: 弹在过载限制下拐弯，半径给得比转弯半径还小就会画圆够不着。
+        "waypoint_radius": Params.distance(500.0, minimum=1.0),
     }
 
     __slots__ = (
@@ -118,6 +127,8 @@ class GuidanceComputer(Component):
         "_point",
         "_target_id",
         "_lethal",
+        "_route",
+        "_wp_index",
     )
 
     # -- 生命周期 ----------------------------------------------------------
@@ -158,6 +169,27 @@ class GuidanceComputer(Component):
                     "这份想定里——检查 platform 名字是否写错"
                 )
             self._target_id = found.entity_id
+
+        # -- 途径点（v0.13.63）------------------------------------------------
+        # 参数系统只保证"是一串数"（见 Params.numbers）；两两成对是**这里的
+        # 语义**——奇数个意味着有人少写了一个坐标，静默丢掉比报错难看得多。
+        raw = tuple(self.spec["route"])
+        if len(raw) % 2:
+            raise ConfigurationError(
+                f"{self.type_name or type(self).__name__}: route 是坐标对序列"
+                f"（x1 y1 x2 y2 …），收到 {len(raw)} 个数——奇数个必有漏写"
+            )
+        self._route: tuple[tuple[float, float], ...] = tuple(
+            (raw[i], raw[i + 1]) for i in range(0, len(raw), 2)
+        )
+        if any(
+            phase.horizontal == HORIZ_ROUTE for phase in self._phases
+        ) and not self._route:
+            raise ConfigurationError(
+                f"{self.type_name or type(self).__name__}: 有阶段用 route 导引"
+                "但 route 参数是空的——写途径点序列，或把该阶段的水平律换掉"
+            )
+        self._wp_index = 0
 
     # -- 运行期：目标 ------------------------------------------------------
 
@@ -335,13 +367,24 @@ class GuidanceComputer(Component):
         """本阶段的水平横向加速度（m/s²，正 = 右转）。"""
         if phase.horizontal == HORIZ_HOLD:
             return 0.0
+        if phase.horizontal == HORIZ_ROUTE:
+            wp = self._next_waypoint(st)
+            if wp is not None:
+                # 指向途径点与 HORIZ_TARGET 同一套追踪律——只是"目标"换成了
+                # 当前途径点。转弯需求由过载上限夹（阶段/弹体取更严）。
+                az = degrees(atan2(wp[0] - st.x, -(wp[1] - st.y)))
+                error = wrap180(az - st.heading)
+                h_speed = hypot(st.speed, 1e-12)
+                return float(self.spec["pursuit_gain"]) * h_speed * radians(error)
+            # 走完全部途径点：往下落进 HORIZ_TARGET 的实现——末端交给目标。
         if target is None:
             raise ConfigurationError(
                 f"{self.type_name or type(self).__name__}: 阶段 {phase.name!r} 要用"
                 f" {phase.horizontal!r} 导引，但制导件没有目标——"
                 "写 target_name，或在运行期调 assign_target_point()"
             )
-        if phase.horizontal == HORIZ_TARGET:
+        if phase.horizontal in (HORIZ_TARGET, HORIZ_ROUTE):
+            # route 律走完点后也到这里（见上）——"退化"就是同一套追踪律。
             error = wrap180(st.target_heading - st.heading)
             h_speed = hypot(st.speed, 1e-12)
             return float(self.spec["pursuit_gain"]) * h_speed * radians(error)
@@ -358,6 +401,27 @@ class GuidanceComputer(Component):
         if phase.horizontal == HORIZ_PN or phase.vertical == VERT_PN:
             return float(self.spec["intercept_gain"])
         return float(self.spec["pursuit_gain"])
+
+    def _next_waypoint(
+        self, st: FlightState
+    ) -> tuple[float, float] | None:
+        """当前要飞的途径点；进半径就切下一个，走完返回 ``None``。
+
+        **切点用循环**：一帧（2 s × 240 m/s = 480 m）跨过一个大半径是可能
+        的（``waypoint_radius`` 给到上千米、点又挨得近时），if 会漏切。
+        **只查水平距离**：途径点不带高度，垂向是阶段剧本的事。
+
+        切点只发生在 route 律被调用的子步里——``HORIZ_HOLD`` 的发射段不切。
+        这是有意的：发射段弹还没转到第一个点的方向，此刻离点近不代表"过了"。
+        """
+        radius = float(self.spec["waypoint_radius"])
+        while self._wp_index < len(self._route):
+            wx, wy = self._route[self._wp_index]
+            if hypot(wx - st.x, wy - st.y) <= radius:
+                self._wp_index += 1
+                continue
+            return self._route[self._wp_index]
+        return None
 
     # -- 几何 --------------------------------------------------------------
 
@@ -475,6 +539,14 @@ class GuidanceComputer(Component):
 
     def phase_table(self) -> tuple[Phase, ...]:
         return self._phases
+
+    def waypoints(self) -> tuple[tuple[float, float], ...]:
+        """途径点表（世界坐标 x/y，米）。没配 route 时是空元组。"""
+        return self._route
+
+    def waypoint_index(self) -> int:
+        """已经**过掉**的途径点个数（``len(route)`` = 全部走完）。"""
+        return self._wp_index
 
     def timeline(self) -> list[tuple[str, float, float | None]]:
         return [(str(row[0]), float(row[1]), row[2]) for row in self._timeline]
