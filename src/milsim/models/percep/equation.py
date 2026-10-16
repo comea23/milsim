@@ -69,6 +69,7 @@ __all__ = [
     "POLARIZATION_KINDS",
     "polarization_effect",
     "bandwidth_overlap_ratio",
+    "hop_jamming_overlap",
     "one_way_loss",
     "jamming_path_loss_db",
     "jamming_power",
@@ -802,6 +803,94 @@ def bandwidth_overlap_ratio(
         return 0.0                            # 完全错开
     overlap = min(high_j, high_r) - max(low_j, low_r)
     return min(overlap / (high_j - low_j), 1.0)
+
+
+def hop_jamming_overlap(
+    jammer_frequency_hz: float,
+    jammer_bandwidth_hz: float,
+    center_frequency_hz: float,
+    hop_bandwidth_hz: float,
+    receiver_bandwidth_hz: float,
+    hop_follow: bool,
+) -> float:
+    """**跳频口径的 F_BW**（v0.13.64，§5.14.15）：受害方捷变频时的带内比例。
+
+    受害方开着跳频（``hop_bandwidth_hz > 0``）时，瞬时接收带（宽 ``B_r``）
+    的中心在跳频带 ``center_frequency_hz ± hop/2`` 内逐驻留跳变；干扰机若
+    **跟不上**，只能赌"这一拍落在我的谱里"。对驻留位置取平均，期望进入
+    接收带的功率比例是
+
+    ``E[F_BW] = ∫ w(f) df / (B_hop × B_j)``
+
+    其中 ``w(f)`` 是"中心调到 ``f`` 的瞬时带与干扰谱的重叠长度"——即两个
+    矩形（宽 ``B_r`` 的滑窗、宽 ``B_j`` 的干扰谱）的**卷积在跳频带上截断**。
+    ``w`` 分段线性，断点处梯形积分**精确**，没有任何数值近似；只在
+    ``B_j = 0``（CW）时走"命中即全额"的独立小式（重叠长度 ÷ ``B_hop``）。
+
+    四条**自洽性**（也是本函数存在而非在调用点写 ``if`` 的理由）：
+
+    - ``hop_bandwidth_hz <= 0`` 或 ``hop_follow=True``：**逐位等于**
+      :func:`bandwidth_overlap_ratio` 的现状——不跳频 / 干扰机跟得上每一拍。
+    - ``B_hop <= B_r``：只有一个驻留位置（退化 = 不跳），逐位回到现状。
+    - **干扰谱在跳频带内部**（离边 ≥ ``B_r/2``）：卷积完整，
+      ``E = B_r/B_hop``——与 ``B_j`` 无关：瞄准式与阻塞式**同样吃亏**，
+      "跳频挡不住盖满带的阻塞式、只惩罚赌单点的干扰机"这句话**只对一半**，
+      精确账是：只要谱在带内，每拍平均都只吃到 ``B_r/B_hop`` 份。
+    - **盖满整个跳频带的阻塞式**（``B_j ≥ B_hop``、居中）：每个驻留
+      ``w = B_r`` ⇒ ``E = B_r/B_j``——与"阻塞式对单频点"的现状**同一个数**。
+
+    ★ **只进 J 账**。波长、回波、Pd、量测 σ 全由中心频率与瞬时带宽决定，
+    与这一项无关——捷变频是雷达自己的抗扰手段，不是"换了一部雷达"。
+
+    ★ ``hop_bandwidth_hz <= 0`` 按**不跳频**处理而不是报错：调用方（受害方
+    的 ``_jam_band_overlap``）对老想定**逐字走原路**，本函数是唯一分岔点。
+    """
+    if hop_bandwidth_hz <= 0.0 or hop_follow or hop_bandwidth_hz <= receiver_bandwidth_hz:
+        return bandwidth_overlap_ratio(
+            jammer_frequency_hz,
+            jammer_bandwidth_hz,
+            center_frequency_hz,
+            receiver_bandwidth_hz,
+        )
+    hop_lo = center_frequency_hz - 0.5 * hop_bandwidth_hz
+    hop_hi = center_frequency_hz + 0.5 * hop_bandwidth_hz
+
+    if jammer_bandwidth_hz <= 0.0:            # CW：单频点，命中即全额
+        lo = max(jammer_frequency_hz - 0.5 * receiver_bandwidth_hz, hop_lo)
+        hi = min(jammer_frequency_hz + 0.5 * receiver_bandwidth_hz, hop_hi)
+        return max(hi - lo, 0.0) / hop_bandwidth_hz
+
+    j_lo = jammer_frequency_hz - 0.5 * jammer_bandwidth_hz
+    j_hi = jammer_frequency_hz + 0.5 * jammer_bandwidth_hz
+    if j_hi <= hop_lo or j_lo >= hop_hi:
+        return 0.0                            # 谱完全在跳频带外：一拍都撞不上
+
+    def _w(f: float) -> float:
+        """瞬时带中心调到 ``f`` 时与干扰谱的重叠长度（Hz）。"""
+        return max(
+            min(f + 0.5 * receiver_bandwidth_hz, j_hi)
+            - max(f - 0.5 * receiver_bandwidth_hz, j_lo),
+            0.0,
+        )
+
+    # w 分段线性；把全部断点（含积分端点）排好，逐段梯形积分——精确。
+    edges = sorted(
+        [hop_lo, hop_hi]
+        + [
+            e
+            for e in (
+                j_lo - 0.5 * receiver_bandwidth_hz,
+                j_lo + 0.5 * receiver_bandwidth_hz,
+                j_hi - 0.5 * receiver_bandwidth_hz,
+                j_hi + 0.5 * receiver_bandwidth_hz,
+            )
+            if hop_lo < e < hop_hi
+        ]
+    )
+    total = sum(
+        0.5 * (_w(a) + _w(b)) * (b - a) for a, b in zip(edges, edges[1:])
+    )
+    return total / (hop_bandwidth_hz * jammer_bandwidth_hz)
 
 
 def one_way_loss(two_way_loss_db: float) -> float:

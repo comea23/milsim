@@ -357,6 +357,15 @@ class RadarSensor(Component):
         #: 而 ``F_BW`` 的分母要接收机的调谐带宽。标定法**不**用它算噪声
         #: （标定法的 N 折进标定好的 SNR 里了，见 ``noise_power``）。
         "bandwidth": Params.frequency(0.0, minimum=0.0),
+        #: **跳频总带宽**（Hz，v0.13.64，§5.14.15）。**0 = 不跳频**（单频点，
+        #: 旧行为逐字不变——默认档）。> 0 ⇒ ``frequency`` 是**跳频带中心**，
+        #: 瞬时接收带在 ``frequency ± hop/2`` 内捷变；瞬时接收带本身仍是
+        #: ``bandwidth``。★ **只进干扰账**（``F_BW`` 换成跳频平均口径，见
+        #: ``equation.hop_jamming_overlap``）：波长、回波、Pd、量测 σ 一概不动
+        #: ——捷变频是抗扰手段，不是"换了一部雷达"。校验：``0 < hop <
+        #: bandwidth`` 会报错（跳频带至少要装下瞬时带；``hop == bandwidth``
+        #: 合法但退化 = 不跳）。
+        "hop_bandwidth": Params.frequency(0.0, minimum=0.0),
         #: **接收机噪声功率**（W）。★ 只有**标定法**需要它，理由是一条算术：
         #: ``J/S = J/(SNR·N)`` 要有**绝对的 N**，而标定法把 N 折进了那条
         #: "距离 ↔ Pd"的曲线里，手上没有绝对值（``noise_w = 0``）。
@@ -503,6 +512,7 @@ class RadarSensor(Component):
         "_tx_loss_given",
         "frequency_hz",
         "bandwidth_hz",
+        "hop_bandwidth_hz",
         "polarization_type",
         "_jam",
         "jamming_w",
@@ -853,6 +863,9 @@ class RadarSensor(Component):
                 self.pfa,
                 nonfluctuating=(self.swerling_case == 0),
             )
+            self._resolve_hop_bandwidth(
+                self.type_name or type(self).__name__
+            )
             return
 
         name = self.type_name or type(self).__name__
@@ -905,6 +918,7 @@ class RadarSensor(Component):
                 )
             bandwidth = 1.0 / (pulse_width_us / 1.0e6)
         self.bandwidth_hz = bandwidth
+        self._resolve_hop_bandwidth(name)
         # 系统噪声温度：Blake 级联式（天线 + 馈线 + 接收机三段）。
         # ★ 馈线损耗**只在这里**出现这一次——它不进信号路径（AFSIM 口径）。
         temperature_k = eq.cascade_noise_temperature(
@@ -1080,6 +1094,71 @@ class RadarSensor(Component):
         return measured_bearing, measured_horizontal, sigma_position
 
     # -- 第 6 步的干扰项：S/(N+J)（§5.14）----------------------------------
+
+    def _resolve_hop_bandwidth(self, name: str) -> None:
+        """解析跳频带（v0.13.64，§5.14.15）：装配期一次，两条路（标定 / 逐参）都走。
+
+        ★ ``hop_bandwidth`` 的合法性依赖**解析后**的接收带宽（逐参法里它
+        可能由 ``1/τ`` 推出来），所以校验放在 ``bandwidth_hz`` 定稿之后，
+        而不是参数表读进来那一刻。0 = 不跳频，不做任何检查（老想定逐字不变）。
+        """
+        hop = float(self.spec["hop_bandwidth"])
+        self.hop_bandwidth_hz = hop
+        if hop <= 0.0:
+            return
+        if self.bandwidth_hz <= 0.0:
+            raise ConfigurationError(
+                f"{name}: 写了 hop_bandwidth 就是在告诉对方'我在捷变频'，"
+                "但接收机带宽（bandwidth，或由 pulse_width 推）是 0——"
+                "瞬时带都没有，'在带内跳'无从谈起。先补 bandwidth"
+            )
+        if hop < self.bandwidth_hz:
+            raise ConfigurationError(
+                f"{name}: hop_bandwidth ({hop:g} Hz) 不得小于接收机带宽 "
+                f"({self.bandwidth_hz:g} Hz)——跳频带至少要装下瞬时带，"
+                "否则'跳'出来的每一拍都比接收机还窄，语义不成立。"
+                "等于带宽合法但退化（= 不跳，逐位走老口径）"
+            )
+
+    def _jam_band_overlap(self, row) -> float:
+        """``F_BW`` 的**唯一出处**（v0.13.64）：压制与假目标两支共用。
+
+        跳频开着且这台干扰机不跟随 ⇒ 走跳频平均口径
+        （:func:`~milsim.models.percep.equation.hop_jamming_overlap`）；
+        否则逐位等于老口径。"同一个判据两支共用"由此保住——两支各算各的话，
+        "同一台干扰机在两个视图里得到两个答案"的老毛病（v0.13.31 修过的那个）
+        会原样复发。
+
+        ★ **``follow`` 的两条知识路线**（想定表态 + 一个截获闸门）：
+
+        - **档案路线**（``hop_follow=False``）：威胁库比对——知道受害方的
+          跳频带与中心，能对准带放谱，但**追不上逐拍频点** ⇒ 卷积平均口径。
+        - **实时路线**（``hop_follow=True``）：自带侦察接收机实测频率跟随
+          ——**前提是此刻收得到该雷达的辐射**。功能级口径：**主瓣截获才
+          跟随**——雷达波束没照到干扰机（``off_beam_deg`` 可比且不在主瓣内）
+          ⇒ 侦察接收机收不到主瓣辐射 ⇒ 退回档案路线（按不跟随算），而不是
+          一分不进。副瓣截获要灵敏度模型，本版不建（§5.14.15）。
+          ★ **地形视距不作为此闸门**：路径互易——山挡住了侦察就同样挡住
+          干扰（同一个 :meth:`_has_line_of_sight` 判据），拿它当闸门恒与
+          遮蔽同开同关，账上等于没闸。
+          ★ ``off_beam_deg is None``（名册出口，无波束指向可比）⇒ 不判 ⇒
+          跟随照算——与角度量的"没有数据就不判"同一条边界。
+        """
+        follow = row.hop_follow
+        if follow and self.hop_bandwidth_hz > 0.0:
+            # 名册卡（JammerSpec）与威胁行（Threat）都从这条路走：前者没有
+            # 波束上下文，与后者的 ``off_beam_deg is None`` 同口径——不判。
+            off = getattr(row, "off_beam_deg", None)
+            if off is not None and not row.in_main_lobe:
+                follow = False               # 主瓣没照到它 ⇒ 退回档案路线
+        return eq.hop_jamming_overlap(
+            row.frequency_hz,
+            row.bandwidth_hz,
+            self.frequency_hz,
+            self.hop_bandwidth_hz,
+            self.bandwidth_hz,
+            follow,
+        )
 
     def _require_jam_budget(self) -> None:
         """标定法要参与干扰求值时，把缺的那几项**一次报全**。
@@ -1274,12 +1353,7 @@ class RadarSensor(Component):
         bias_azimuth = 0.0
         phantoms: list[FalseTargetSource] = []
         for threat in threats:
-            f_bw = eq.bandwidth_overlap_ratio(
-                threat.frequency_hz,
-                threat.bandwidth_hz,
-                self.frequency_hz,
-                self.bandwidth_hz,
-            )
+            f_bw = self._jam_band_overlap(threat)
             if f_bw <= 0.0:
                 continue                    # 这台在带外：一分都进不来
             # ---- ② 山那面挡不挡得住（v0.13.31）----
@@ -1593,12 +1667,10 @@ class RadarSensor(Component):
             # 的事）、功率也没算。于是"跳频把干扰挡在带外"这条在**压制**那一支
             # 生效、在**假目标**这一支不生效——同一个干扰机在两个视图里得到
             # 两个答案。现在两支走同一套判据。
-            f_bw = eq.bandwidth_overlap_ratio(
-                row.frequency_hz,
-                row.bandwidth_hz,
-                self.frequency_hz,
-                self.bandwidth_hz,
-            )
+            # ★ v0.13.64 起这套判据收进 :meth:`_jam_band_overlap`（压制支
+            # 同一拍也在用它）——跳频平均口径与老口径的唯一分岔点在那里，
+            # 这里不再各写一遍。
+            f_bw = self._jam_band_overlap(row)
             if f_bw <= 0.0:
                 continue                        # 带外：假回波也造不出来
             if not self._has_line_of_sight(me, row.position, row.antenna_height_m):

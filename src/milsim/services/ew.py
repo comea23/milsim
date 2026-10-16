@@ -229,6 +229,12 @@ class JammerSpec:
     antenna_count: int = 1
     #: 干扰机谱宽（Hz）。**0 = 连续波**（单频点），见 ``bandwidth_overlap_ratio``。
     bandwidth_hz: float = 0.0
+    #: **自带侦察接收机、实测频率跟随**（v0.13.64）。默认 ``False`` = 档案
+    #: 路线（威胁库比对，知道跳频带、追不上频点）。它只说明"这台干扰机的
+    #: 样式与情报来源"，折算成带内比例（含"收得到才跟"的视距闸门）是
+    #: **受害方**的事（``equation.hop_jamming_overlap``，§5.14.15）——
+    #: 与 ``polarization_type`` 同一条分工规矩。
+    hop_follow: bool = False
     #: 占空比，``(0, 1]``。1 = 连续波。**默认档下它进 J**（见下）。
     duty_cycle: float = 1.0
     #: 见 :meth:`radiated_power_w`。默认 ``False``（= AFSIM 的 ``mUsePeakPower``
@@ -327,6 +333,8 @@ class Threat:
     frequency_hz: float
     #: 0 = 连续波。
     bandwidth_hz: float
+    #: **已知并跟随受害方跳频规律**（v0.13.64，见 :attr:`JammerSpec.hop_follow`）。
+    hop_follow: bool
     #: 极化失配的**显式覆盖**（线性）。**负数 = 未给** ⇒ 受害方按两端**类型**
     #: 查表（见 :attr:`JammerSpec.polarization`）。
     polarization: float
@@ -821,6 +829,7 @@ class JamService:
             antenna_height_m=spec.antenna_height_m,
             frequency_hz=spec.frequency_hz,
             bandwidth_hz=spec.bandwidth_hz,
+            hop_follow=spec.hop_follow,
             polarization=spec.polarization,
             polarization_type=spec.polarization_type,
             slant_m=slant,

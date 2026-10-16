@@ -87,6 +87,16 @@ class Jammer(Component):
         #: ★ 宽窄是**频域**维度：``B_j`` 远大于受害方带宽 = 阻塞式，
         #: ``F_BW`` 会被打成 ``B_r/B_j``（窄 10 倍就 −10 dB）。
         "bandwidth": Params.frequency(0.0, minimum=0.0),
+        #: **自带侦察接收机、实测频率跟随**（v0.13.64，§5.14.15）。默认
+        #: ``False`` = **档案路线**：威胁库比对——知道对方跳频带与中心，
+        #: 追不上逐拍频点（受害方开 ``hop_bandwidth`` 时 J 按**跳频带平均**，
+        #: ``B_r/B_hop`` 那一份白亏）。``True`` = **实时路线**：收到雷达脉冲
+        #: 当场测频当场调谐，跟得上每一拍（退化为单频点口径）——但**前提是
+        #: 此刻收得到该雷达的辐射**（受害方侧用与遮蔽同一个视距判据闸门；
+        #: 侦收断 ⇒ 自动退回档案路线，不是一分不进）。这是想定侧的表态：
+        #: 侦察接收机的灵敏度和引导速度建不建得出来，是装备账，不是这台
+        #: 机器运行时算得出来的。
+        "hop_follow": Params.boolean(False),
         #: 峰值增益（dB）。**默认 0 dBi = 各向同性**——这是一个**合法取值**，
         #: 不是"没给"（同 §9-42 那条判据的反面：0 落在指数上才是缺数据，
         #: 落在"就是这个值"的位置上就是真的 0）。
@@ -213,6 +223,7 @@ class Jammer(Component):
             frequency_hz=self.frequency_hz,
             antenna_count=count,
             bandwidth_hz=float(self.spec["bandwidth"]),
+            hop_follow=bool(self.spec["hop_follow"]),
             duty_cycle=duty,
             use_peak_power=bool(self.spec["use_peak_power"]),
             internal_loss=eq.linear(float(self.spec["internal_loss_db"])),
