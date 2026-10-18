@@ -1,0 +1,3 @@
+side,n_queued,n_delivered,n_discarded,lat_mean_s,lat_max_s,jaccard,smc,lat_mae_s,lat_tic
+afsim,59,59,0,0.000130,0.000130,1.0,1.0,0.000,1.0000
+milsim,30,30,0,0.000000,0.000000,1.0,1.0,0.000,1.0000

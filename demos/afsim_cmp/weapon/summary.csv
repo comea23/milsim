@@ -1,0 +1,5 @@
+cid,t_flight_a_s,t_flight_m_s,dt_flight_s,cpa_a_m,cpa_m_m,d_cpa_m,hit_a,hit_m,verdict
+d50km_a500,473.95,450.0,-23.95,0.4,672.6,672.2,True,False,看一眼
+d50km_a8000,437.3,381.0,-56.3,0.9,606.5,605.6,True,False,看一眼
+d80km_a500,587.15,568.0,-19.15,0.4,565.9,565.5,True,False,看一眼
+d80km_a8000,549.65,498.0,-51.65,0.7,559.4,558.7,True,False,看一眼

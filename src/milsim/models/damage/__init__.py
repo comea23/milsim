@@ -6,17 +6,31 @@
 from __future__ import annotations
 
 from .base import WARHEAD_FACTORS, WARHEAD_KINDS, Warhead, hit_probability
+from .degrade import (
+    BUILTIN_PROFILES,
+    DEGRADE_KEYS,
+    DegradationProfile,
+    capability_of,
+    configured,
+    resolve,
+)
 from .prob_table import ProbTable, load_default
 
 #: 框架自带的战斗部参考实现。想定里 ``component damage WARHEAD`` 直接用。
 FRAMEWORK_DAMAGE: tuple[type, ...] = (Warhead,)
 
 __all__ = [
+    "BUILTIN_PROFILES",
+    "DEGRADE_KEYS",
+    "DegradationProfile",
     "FRAMEWORK_DAMAGE",
     "ProbTable",
     "WARHEAD_FACTORS",
     "WARHEAD_KINDS",
     "Warhead",
+    "capability_of",
+    "configured",
     "hit_probability",
     "load_default",
+    "resolve",
 ]

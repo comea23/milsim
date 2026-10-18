@@ -426,6 +426,19 @@ class Phase:
     #: 本阶段的机动加速度上限（m/s²）。``None`` = 用弹体自己的
     #: ``radial_accel``。制导件先夹一道、弹体再夹一道，取更严的那个。
     max_accel: float | None = None
+    #: **俯仰角上限**（度，v0.13.66，§9-35）。``None`` = 不限。
+    #:
+    #: 它是**定高垂向律的第三个上限**（速率、加速度之后）：定高律由高度差
+    #: 算出垂直速率指令后，把它换算成弹道倾角（``asin(vz/v)``）钳到
+    #: ``±max_pitch_angle`` 再执行——与 AFSIM ``WsfGuidanceProgram`` 的
+    #: ``mMaxPitchAngle`` 同一套语义（**对称**：爬升与俯冲同一限值）。没有
+    #: 它，从高空发射的巡航弹在贴海段会把"高度差 × 增益"算成接近垂直下扎
+    #: 的速率指令（实测 −83°），而参照弹被 50 deg 夹着以 −50° 俯冲。
+    #:
+    #: **只许配在 ``VERT_ALTITUDE`` 阶段**：AFSIM 里它是定高程序的量，别的
+    #: 垂向律（PN/FPA/平衡/自由）没有消费点——配了就是"那句指令静默失效"，
+    #: 按装配期报错处理。
+    max_pitch_angle: float | None = None
     #: 本阶段允许点火吗。假 = 提前关机。
     motor: bool = True
 
@@ -478,6 +491,16 @@ class Phase:
             raise ParamError(
                 f"阶段 {self.name}: 过载上限不能为负，收到 {self.max_accel}"
             )
+        if self.max_pitch_angle is not None:
+            if self.max_pitch_angle < 0.0:
+                raise ParamError(
+                    f"阶段 {self.name}: 俯仰角上限不能为负，收到 {self.max_pitch_angle}"
+                )
+            if law != VERT_ALTITUDE:
+                raise ParamError(
+                    f"阶段 {self.name}: 俯仰角上限只认定高律（VERT_ALTITUDE），"
+                    f"这里垂向律是 {law!r}——那句上限没有消费点，不会生效"
+                )
 
     # -- 诊断 --------------------------------------------------------------
 
@@ -491,6 +514,8 @@ class Phase:
             bits.append(f"倾角={self.flight_path_angle:g}°")
         if self.speed is not None:
             bits.append(f"速率={self.speed:g} m/s")
+        if self.max_pitch_angle is not None:
+            bits.append(f"俯仰限={self.max_pitch_angle:g}°")
         bits.append(f"水平={self.horizontal}")
         if self.until is not None:
             bits.append(f"到 {self.until.describe()}")

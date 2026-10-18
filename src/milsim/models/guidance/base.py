@@ -46,6 +46,7 @@ from .contract import (
     HORIZ_PN,
     HORIZ_ROUTE,
     HORIZ_TARGET,
+    SPEED_EPS,
     FlightState,
     GuidanceCommand,
     Phase,
@@ -350,6 +351,17 @@ class GuidanceComputer(Component):
             if phase.altitude_agl:
                 z_cmd += st.ground_z
             vz_cmd = float(self.spec["altitude_gain"]) * (z_cmd - st.z)
+            # 俯仰角上限（v0.13.66，§9-35）：把垂直速率请求换算成弹道倾角
+            # （asin(vz/v)）钳到 ±限值再执行——等价于 vz 钳到 ±v·sin(限值)。
+            # AFSIM 的 mMaxPitchAngle 是同一套语义（WsfGuidanceProgram：
+            # newPitch = Limit(asin(reqVz/curSpeed), −max, +max)），限值
+            # **对称**，速率用**总速率**（它的 curSpeed = GetSpeedWCS()）。
+            # 不钳的后果（实测）：高空发射的巡航弹在贴海段把"高度差 × 增益"
+            # 算成 −238 m/s 的垂直速率（240 m/s 弹速 ⇒ 倾角 −83°），近乎
+            # 垂直下扎；参照弹被 50 deg 夹着以 −50° 俯冲——高度剖面差的大头。
+            if phase.max_pitch_angle is not None and speed > SPEED_EPS:
+                vz_limit = speed * sin(radians(phase.max_pitch_angle))
+                vz_cmd = max(-vz_limit, min(vz_limit, vz_cmd))
             error = vz_cmd - st.vertical_speed
             return gravity_term + float(self.spec["climb_gain"]) * error
         if phase.vertical == VERT_FPA:

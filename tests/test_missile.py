@@ -784,9 +784,9 @@ def test_asm_table_splits_on_the_target_angle() -> None:
     assert second.until.value == -20.0
     # 俯冲段不夹过载（留给弹体）——照抄巡航弹末段那个 30 时实测打不中
     assert third.max_accel is None
-    # 前两段的横向律都一样：**航向指目标**。这不是"照抄参照"——原脚本那两段
-    # 跟的是预规划航路（``allow_route_following true``），我们没有那个能力
-    # （§9-31），直扑是"没做横向规划"的默认行为。
+    # 前两段的横向律都一样：**航向指目标**。这是 ASM_GUIDANCE（无航路版）
+    # 的默认行为；要沿预规划航路飞用 ROUTE_ASM_GUIDANCE（v0.13.66，§9-31），
+    # 那张表只换巡航段的水平律。
     assert first.horizontal == HORIZ_TARGET
     assert second.horizontal == HORIZ_TARGET
 
@@ -1233,6 +1233,112 @@ def test_cruise_missile_passes_waypoints_in_order_and_still_hits() -> None:
     bound = 2_500.0 + 480.0
     order: list[int] = []
     for wx, wy in waypoints:
+        gaps = [hypot(px - wx, py - wy) for px, py, _z in rig.view.track]
+        best = min(gaps)
+        assert best <= bound, f"途径点 ({wx:g}, {wy:g}) 最近 {best:.0f} m"
+        order.append(gaps.index(best))
+    assert order[0] < order[1], "必须先过第一个点再过第二个点"
+
+
+# ===========================================================================
+# 俯仰角上限 + 途径点反舰弹（v0.13.66，§9-31/§9-35）
+# ===========================================================================
+
+def test_pitch_limit_lives_only_in_the_altitude_law() -> None:
+    """俯仰角上限是**定高律的量**：配到别的垂向律上是"没有消费点的指令"，
+    装配期报错——静默失效比报错糟。负数同拦。
+    """
+    with pytest.raises(ParamError, match="俯仰角上限"):
+        Phase("SEEK", vertical=VERT_BALANCE, horizontal=HORIZ_TARGET,
+              max_pitch_angle=50.0)
+    with pytest.raises(ParamError, match="俯仰角上限"):
+        Phase("SEEK", altitude=100.0, max_pitch_angle=-1.0)
+    # 定高律配它是合法的，默认不配（None）也合法——旧表逐字不变。
+    Phase("SEEK", altitude=100.0, max_pitch_angle=50.0)
+    assert ASM_PHASES[0].max_pitch_angle is None
+
+
+def test_pitch_limit_clamps_the_vertical_rate_request() -> None:
+    """定高律的垂直速率指令被钳到 ``±v·sin(限值)``。
+
+    单元口径：10 km 高度差按外环增益算出 −300 m/s 的垂直速率请求，弹速
+    200 m/s 时那是 −asin(1.5)——根本不存在的倾角；钳到 50° 后请求变成
+    ``−200·sin(50°)``。与 AFSIM 的 ``mMaxPitchAngle`` 同一套语义
+    （Limit(asin(reqVz/curSpeed), −max, +max)，限值对称、速率用总速率）。
+    """
+    from math import radians, sin
+
+    def vertical_accel(limit: float | None) -> float:
+        phase = Phase("SEEK", altitude=0.0, altitude_agl=True,
+                      horizontal=HORIZ_TARGET, max_pitch_angle=limit)
+        rig = build(CRUISE_BODY, guidance_type="CRUISE_GUIDANCE",
+                    guidance_params={"phases": (phase,),
+                                     "target_name": TARGET_NAME},
+                    target=(0.0, -20_000.0, 0.0))
+        return rig.guidance.command(_seek_state(z=10_000.0)).vertical_accel
+
+    g0 = STANDARD_GRAVITY  # γ=0 ⇒ 抵消重力那份就是 g
+    # 不钳：外环增益 0.03/s × 10 km = −300 m/s 的请求，全额执行
+    assert vertical_accel(None) == pytest.approx(g0 - 300.0)
+    # 钳 50°：请求变成 −200·sin(50°) = −153.21
+    assert vertical_accel(50.0) == pytest.approx(
+        g0 - 200.0 * sin(radians(50.0)))
+    # 对称性：俯冲钳、爬升也钳——把高度差反过来（弹在目标下面）
+    phase = Phase("SEEK", altitude=20_000.0, horizontal=HORIZ_TARGET,
+                  max_pitch_angle=30.0)
+    rig = build(CRUISE_BODY, guidance_type="CRUISE_GUIDANCE",
+                guidance_params={"phases": (phase,), "target_name": TARGET_NAME},
+                target=(0.0, -20_000.0, 0.0))
+    up = rig.guidance.command(_seek_state(z=10_000.0)).vertical_accel
+    assert up == pytest.approx(g0 + 200.0 * sin(radians(30.0)))
+
+
+def test_route_asm_table_differs_only_in_cruise() -> None:
+    """路线版反舰表：只换巡航段的水平律与俯仰限位，POPUP/DIVE 照旧。"""
+    from milsim.models.guidance import ASM_ROUTE_PHASES, RouteAsmGuidance
+    from milsim.services.type_registry import ComponentFactory as _F
+
+    assert ASM_ROUTE_PHASES[0].horizontal == HORIZ_ROUTE
+    assert ASM_ROUTE_PHASES[0].max_pitch_angle == 50.0
+    assert ASM_ROUTE_PHASES[1:] == ASM_PHASES[1:]
+    assert ASM_PHASES[0].horizontal == HORIZ_TARGET   # 旧表不受影响
+    assert _F().resolve_class("ROUTE_ASM_GUIDANCE") is RouteAsmGuidance
+
+
+def test_route_asm_without_route_is_rejected() -> None:
+    """路线版反舰弹 route 留空：装配期报错（基类的既有检查）。"""
+    with pytest.raises(ConfigurationError, match="route"):
+        build({**CRUISE_BODY, "radial_accel": 45.0},
+              guidance_type="ROUTE_ASM_GUIDANCE",
+              guidance_params={"target_name": TARGET_NAME},
+              target=near((0.0, 0.0, 0.0), 40_000.0))
+
+
+def test_asm_missile_follows_route_then_hits() -> None:
+    """端到端：反舰弹先绕开两个途径点，再折回来打目标——仍命中。
+
+    轨迹证据同巡航弹那条：按序过点（最近距离 ≤ 半径 + 一帧位移），末段
+    不受绕路影响。这一条就是 §9-31 那句"先走完航路、再转向目标"的验收。
+    """
+    from milsim.models.guidance import RouteAsmGuidance
+
+    rig = build(
+        {**CRUISE_BODY, "radial_accel": 45.0},
+        guidance_type="ROUTE_ASM_GUIDANCE",
+        guidance_params={
+            "route": (50_000.0, 20_000.0, 10_000.0, 45_000.0),
+            "waypoint_radius": 2_500.0,
+        },
+        target=(0.0, -60_000.0, 0.0),
+    )
+    assert isinstance(rig.guidance, RouteAsmGuidance)
+    rig.fly(frames=6_000)
+    assert rig.guidance.hit()
+    assert rig.guidance.waypoint_index() == 2
+
+    bound = 2_500.0 + 480.0
+    order: list[int] = []
+    for wx, wy in rig.guidance.waypoints():
         gaps = [hypot(px - wx, py - wy) for px, py, _z in rig.view.track]
         best = min(gaps)
         assert best <= bound, f"途径点 ({wx:g}, {wy:g}) 最近 {best:.0f} m"

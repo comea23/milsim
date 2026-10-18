@@ -1,0 +1,63 @@
+# 生成：tools/cmp_movers.py · air_vertical · r60_d-4000_v200
+end_time 267 sec
+
+platform_type CMP_R60_D-4000_V200 WSF_PLATFORM
+   icon f-18
+   side blue
+   spatial_domain air
+   mover WSF_AIR_MOVER
+      update_interval 0.1 sec
+      update_time_tolerance 0.01 sec
+      altitude_offset 0 ft
+      at_end_of_path extrapolate
+      on_turn_failure best_effort
+      turn_failure_threshold 0.01
+      maximum_speed 200 m/s
+      minimum_speed 1 m/s
+      maximum_altitude 50000 m
+      minimum_altitude 0 m
+      maximum_climb_rate 60 m/s
+      maximum_flight_path_angle 45 deg
+      maximum_linear_acceleration 20 m/s2
+      maximum_radial_acceleration 100 m/s2
+      bank_angle_limit 60 deg
+      body_g_limit 10 g
+      roll_rate_limit 60 deg/sec
+      heading_pursuit_gain 5
+      path_variance_radius 0 ft
+      speed_variance_percent 0
+      turn_rate_limit 21600 deg/min
+      path_compute_timestep 0.5 sec
+   end_mover
+end_platform_type
+
+platform P1 CMP_R60_D-4000_V200
+   position 34.00000n 83.17000w altitude 2000 m
+   heading 0.00 deg
+   route
+      position 34.00000n 83.17000w altitude 2000 m speed 200 m/s
+      position 34.13490n 83.17000w altitude 2000 m speed 200 m/s
+      position 34.26980n 83.17000w altitude -2000 m speed 200 m/s
+      position 34.40469n 83.17000w altitude -2000 m speed 200 m/s
+   end_route
+end_platform
+
+# ============================================================================
+# 采集块：由 milsim/tools/afsim_ref.py 追加，**不属于原 demo**
+# MOVER_UPDATED 是机动件每次更新时的回调（脚本观察器接口），
+# 原 demo 只写二进制 .aer，事件日志里没有逐帧位置事件，所以轨迹只能这样采。
+# 经纬度减了锚点（33.0 / -84.0）：writeln 的 %g 只有 6 位有效
+# 数字，直接打印绝对经纬度会被量化到 11 m，而每帧只走 10 m。
+# ============================================================================
+script void afsimTrace(WsfPlatform aPlatform, WsfMover aMover)
+   WsfGeoPoint p = aPlatform.Location();
+   writeln("KIN,", TIME_NOW, ",", aPlatform.Name(), ",",
+           p.Latitude() - 33.0, ",",
+           p.Longitude() + 84.0, ",",
+           aPlatform.Altitude(), ",", aPlatform.Speed(), ",",
+           aPlatform.Heading());
+end_script
+
+observer
+   enable MOVER_UPDATED afsimTrace
+end_observer

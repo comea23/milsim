@@ -25,6 +25,8 @@ dev = ["pytest>=8.0", "pyflakes>=3.0"]
 where = ["src"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+# 根目录一并入 path：tools/cmp_metrics（对比算法库）以命名空间包形式被
+# 测试与对拍工具导入（tools/ 本身无 __init__.py，靠 PEP 420 命名空间）。
+pythonpath = ["src", "."]
 testpaths = ["tests"]
 addopts = "-q"

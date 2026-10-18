@@ -1,0 +1,5 @@
+family,cid,n,dur_s,path_km,rmse_h_m,maxae_h_m,rmse_alt_m,rmse_v_mps,tic_v,mean_dhdg_deg,frechet_m,ratio_pct,verdict,params
+asm,d50km_a500,450,450,107.81,2428.9,4195.8,124.8,6.99,0.0146,6.23,2021.5,2.25,看一眼,mass=519 kg;fuel_mass=200 kg;thrust=2900 N;specific_impulse=1478 s;drag_area=0.00923 m2;radial_accel=45 m/s2;max_speed=600 m/s;launch_speed=231.5 m/s;launch_fpa=0 deg
+asm,d50km_a8000,381,381,108.07,7734.3,11747.7,462.7,30.30,0.0540,17.40,1892.6,7.16,看一眼,mass=519 kg;fuel_mass=200 kg;thrust=2900 N;specific_impulse=1478 s;drag_area=0.00923 m2;radial_accel=45 m/s2;max_speed=600 m/s;launch_speed=231.5 m/s;launch_fpa=0 deg
+asm,d80km_a500,568,568,135.97,2276.7,4164.4,115.9,6.44,0.0135,5.24,2083.3,1.67,ok,mass=519 kg;fuel_mass=200 kg;thrust=2900 N;specific_impulse=1478 s;drag_area=0.00923 m2;radial_accel=45 m/s2;max_speed=600 m/s;launch_speed=231.5 m/s;launch_fpa=0 deg
+asm,d80km_a8000,498,498,135.96,7675.6,11631.4,408.3,26.67,0.0491,13.89,2079.9,5.65,看一眼,mass=519 kg;fuel_mass=200 kg;thrust=2900 N;specific_impulse=1478 s;drag_area=0.00923 m2;radial_accel=45 m/s2;max_speed=600 m/s;launch_speed=231.5 m/s;launch_fpa=0 deg

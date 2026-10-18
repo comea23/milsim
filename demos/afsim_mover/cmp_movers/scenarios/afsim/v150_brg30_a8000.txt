@@ -1,0 +1,50 @@
+# 生成：tools/cmp_movers.py · air_straight · v150_brg30_a8000
+end_time 70 sec
+
+platform_type CMP_V150_BRG30_A8000 WSF_PLATFORM
+   icon f-18
+   side blue
+   spatial_domain air
+   mover WSF_KINEMATIC_MOVER
+   end_mover
+end_platform_type
+
+platform P1 CMP_V150_BRG30_A8000
+   position 34.00000n 83.17000w altitude 8000 m
+   heading 30.00 deg
+   mover
+      initial_speed 150 m/s
+      target_speed 150 m/s
+      maximum_linear_acceleration 20 m/s2
+      maximum_radial_acceleration 100 m/s2
+      maximum_body_turn_rate 120 deg/sec
+      maximum_body_roll_rate 500 deg/sec
+      proportional_navigation_gain 10.0
+      velocity_pursuit_gain 30.0
+      update_interval 0.1 sec
+   end_mover
+   route
+      position 34.00000n 83.17000w altitude 8000 m speed 150 m/s
+      position 34.05257n 83.13337w altitude 8000 m speed 150 m/s
+   end_route
+end_platform
+
+# ============================================================================
+# 采集块：由 milsim/tools/afsim_ref.py 追加，**不属于原 demo**
+# MOVER_UPDATED 是机动件每次更新时的回调（脚本观察器接口），
+# 原 demo 只写二进制 .aer，事件日志里没有逐帧位置事件，所以轨迹只能这样采。
+# 经纬度减了锚点（33.0 / -84.0）：writeln 的 %g 只有 6 位有效
+# 数字，直接打印绝对经纬度会被量化到 11 m，而每帧只走 10 m。
+# ============================================================================
+script void afsimTrace(WsfPlatform aPlatform, WsfMover aMover)
+   WsfGeoPoint p = aPlatform.Location();
+   writeln("KIN,", TIME_NOW, ",", aPlatform.Name(), ",",
+           p.Latitude() - 33.0, ",",
+           p.Longitude() + 84.0, ",",
+           aPlatform.Altitude(), ",", aPlatform.Speed(), ",",
+           aPlatform.Heading());
+end_script
+
+observer
+   enable MOVER_UPDATED afsimTrace
+end_observer

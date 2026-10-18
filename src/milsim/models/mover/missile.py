@@ -202,6 +202,9 @@ class MissileMover(Mover):
     （§5.8 的分工：弹体管"能不能做到"，制导件管"要往哪飞"）。
     """
 
+    #: 弹一发即死，能力降级无意义——误配装配期报错（§5.17.11）。
+    DEGRADE_ALLOWED = False
+
     __slots__ = (
         "_vz",
         "_mass",

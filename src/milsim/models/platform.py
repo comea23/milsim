@@ -90,6 +90,23 @@ class Platform:
         #: 它是平台属性而不是机动件参数——概率模型读的是**别人**的它，
         #: 平台属性表正是"把属性交给别人读"的那张表（§5.6）。
         "max_accel": Params.number(0.0, minimum=0.0),
+        #: **能力降级档名**（§5.17.11）：内置 ``armored`` / ``naval``、
+        #: ``custom``（配 mobility_scale + degradation_thresholds）、
+        #: ``off``（显式关，实例用来覆盖类上的档）。空串（默认）= 不降级，
+        #: 直到完好度归 0——历史想定逐字兼容。写在 ``platform_type`` 上
+        #: 即"按类统一设置"（沿继承链下发），写在实例块就地覆盖。
+        "degradation": Params.string(""),
+        #: 降级阶梯阈值（升序书写禁止，须**严格降序**、开区间 (0,1)），
+        #: 档数 = 通道档数 − 1。custom 档必写，内置档可选覆盖。
+        "degradation_thresholds": Params.numbers(()),
+        #: 各档机动比例（速度上限乘数，(0,1]）。custom 档必写。
+        "mobility_scale": Params.numbers(()),
+        #: 各档火力样式：``ok`` / ``halved``（一发耗 2 发弹）/ ``down``
+        #: （拒发，走 command_rejected）。custom 档缺省全 ``ok``。
+        "firepower_tiers": Params.strings(()),
+        #: 各档探测灵敏度折扣（dB，≥ 0；``off`` = 该档关机）。
+        #: custom 档缺省全 0（不折）。
+        "sensor_penalty_db": Params.strings(()),
     }
 
     #: 注册名。由 :func:`register_platform` 写入，便于调试与报错。

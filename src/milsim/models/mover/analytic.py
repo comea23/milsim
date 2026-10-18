@@ -149,6 +149,9 @@ class AnalyticBallisticMover(Mover):
     场合，与 ``GuidanceComputer`` 同一条语义）。
     """
 
+    #: 弹一发即死，能力降级无意义——误配装配期报错（§5.17.11）。
+    DEGRADE_ALLOWED = False
+
     SLOT_HINT = "mover"
 
     #: 不吃地形：洲际弹道大部分时间在大气层外，战区外也照样飞（与

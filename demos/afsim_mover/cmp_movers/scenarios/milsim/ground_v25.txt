@@ -1,0 +1,34 @@
+# 生成：tools/cmp_movers.py · ground_straight · ground_v25
+simulation
+    name     "cmp ground_v25"
+    max_step 0.1 s
+    seed     20261017
+end_simulation
+
+zone CMP_AREA
+    anchor     34.0 -83.17
+    radius     60 km
+    resolution 1 km
+    layers     1
+    terrain    flat
+end_zone
+
+component_type GROUND_MOVER
+end_component_type
+component_type CMP_BODY : GROUND_MOVER
+    max_speed           25 m/s
+    turn_rate           30 deg/s
+    radial_accel        5 m/s2
+    linear_accel        3 m/s2
+    period              0.1 s
+end_component_type
+
+platform_type CMP_PLAT
+    side blue
+    component mover CMP_BODY
+    end_component
+end_platform_type
+
+platform P1 CMP_PLAT
+    position latlng 34.00000 -83.17000
+end_platform

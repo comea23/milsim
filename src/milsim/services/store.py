@@ -1633,6 +1633,11 @@ class SensorView:
     def my_position(self) -> tuple[float, float, float] | None:
         return self._store.position_of(self._entity_id)
 
+    def my_damage(self) -> float:
+        """自己的完好度（1.0 = 完好，0.0 = 摧毁）。探测杀档（§5.17.11）
+        从它算——读自己的血条不开"看别人血条"的口子，口径同 ``my_alive``。"""
+        return self._store.damage_of(self._entity_id)
+
     def my_cell(self) -> CellRef | None:
         return self._store.cell_of(self._entity_id)
 
@@ -1825,6 +1830,11 @@ class MoverView:
         继续跑（位置照旧更新，只有 ``is_alive`` 变了）。
         """
         return self._store.is_alive(self._entity_id)
+
+    def my_damage(self) -> float:
+        """自己的完好度（1.0 = 完好，0.0 = 摧毁）。能力降级（§5.17.11）
+        的档位从它算——档位是完好度的纯函数，每帧现查不缓存。"""
+        return self._store.damage_of(self._entity_id)
 
     def set_pose(
         self,

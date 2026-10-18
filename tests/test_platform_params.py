@@ -175,6 +175,11 @@ def test_platform_type_attributes_are_resolved(
         "max_health": 1.0,
         "armor": 1.0,
         "max_accel": 0.0,
+        "degradation": "",
+        "degradation_thresholds": (),
+        "mobility_scale": (),
+        "firepower_tiers": (),
+        "sensor_penalty_db": (),
     }
     assert factory.resolved_platform_params("ARMOR_BASE")["side"] == "red"
     assert factory.resolved_platform_params("ARMOR_MBT")["crew"] == 4
@@ -278,6 +283,10 @@ def test_the_platform_table_only_holds_keys_someone_reads() -> None:
       与算命中概率时读**目标**的这三个属性（``Warhead._target_param``）：
       血量上限是换算分母、防护是承受比例、机动能力进脱靶量散布。
       呼号、编制等仍然没有消费者，等就位再加。
+    * ``degradation`` 与四个覆盖键（§5.17.11）—— **机动/火力/探测三通道**的
+      降级档：mover 的速度出口、weapon 的开火检查链、percep 的灵敏度各自在
+      装配期 ``degrade.resolve`` 解析、运行期按完好度查档。空值 = 不降级
+      （现状），所以这五个键带默认值不算行为变化。
 
     这条测试**故意**会在加键时失败：它逼着加键的人回答"谁读这个值"。
     §9 第 15 条要消灭的是"写了没人读、拼错也不报错"的平台属性，不是要换
@@ -290,6 +299,11 @@ def test_the_platform_table_only_holds_keys_someone_reads() -> None:
         "max_health",
         "armor",
         "max_accel",
+        "degradation",
+        "degradation_thresholds",
+        "mobility_scale",
+        "firepower_tiers",
+        "sensor_penalty_db",
     }
 
 

@@ -6,9 +6,11 @@
     ├── __init__.py    本文件：只做导出，不含任何实现
     ├── contract.py    两个部件之间的词汇：阶段表 / 飞行状态 / 一帧指令
     ├── base.py        GuidanceComputer  基类 + 导引律
-    ├── cruise.py      CruiseGuidance    CRUISE_GUIDANCE     巡航剧本
-    ├── asm.py         AsmGuidance       ASM_GUIDANCE        跃升俯冲剧本
-    └── ballistic.py   BallisticGuidance BALLISTIC_GUIDANCE  弹道剧本
+    ├── cruise.py      CruiseGuidance    CRUISE_GUIDANCE          巡航剧本
+    │                  RouteCruiseGuidance ROUTE_CRUISE_GUIDANCE  途径点巡航
+    ├── asm.py         AsmGuidance       ASM_GUIDANCE             跃升俯冲剧本
+    │                  RouteAsmGuidance  ROUTE_ASM_GUIDANCE       途径点反舰
+    └── ballistic.py   BallisticGuidance BALLISTIC_GUIDANCE       弹道剧本
 
 组织约定与 :mod:`milsim.models.mover` 一样：**清单只有一份**（下面那个
 元组），:data:`milsim.models.FRAMEWORK_COMPONENTS` 直接展开它，不另抄一遍。
@@ -42,7 +44,7 @@ from .contract import (
     Phase,
     Until,
 )
-from .asm import ASM_PHASES, AsmGuidance
+from .asm import ASM_PHASES, ASM_ROUTE_PHASES, AsmGuidance, RouteAsmGuidance
 from .cruise import CRUISE_PHASES, CRUISE_ROUTE_PHASES, CruiseGuidance, RouteCruiseGuidance
 
 #: 框架自带的制导件。想定里可以直接写这些注册名，不需要额外声明。
@@ -52,6 +54,7 @@ FRAMEWORK_GUIDANCE: tuple[type, ...] = (
     BallisticGuidance,
     CruiseGuidance,
     RouteCruiseGuidance,
+    RouteAsmGuidance,
 )
 
 __all__ = [
@@ -78,7 +81,9 @@ __all__ = [
     "wrap180",
     # -- 参考实现 --
     "ASM_PHASES",
+    "ASM_ROUTE_PHASES",
     "AsmGuidance",
+    "RouteAsmGuidance",
     "BALLISTIC_PHASES",
     "BallisticGuidance",
     "CRUISE_PHASES",

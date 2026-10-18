@@ -1,0 +1,5 @@
+cid	n_pairs	jaccard	snr_rmse_db	tic	theta_db	power_db	d_ref_m	burnthrough_m	burnthrough_a_m	burn_diff_m	verdict
+p100p0_b2m	160	1	0.915401	0.00787517	11.2426	-32.4245	63000.1	nan	nan	nan	看一眼
+p0p003_b2m	160	1	0.915375	0.03549	11.2426	-32.4245	63000.1	nan	nan	nan	看一眼
+p0p001_b2m	160	1	0.91532	0.0530359	11.2426	-32.4245	63000.1	nan	nan	nan	看一眼
+p0p001_b20m	160	0.555556	0.914567	0.101703	11.2426	-32.4245	63000.1	10979.6	13018.3	-2038.75	看一眼

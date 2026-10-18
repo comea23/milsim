@@ -77,8 +77,9 @@ class AirMover(Mover):
     }
 
     def _speed_at(self, ref: Any) -> float:
-        """空中不受地形影响：天空没有"这里难走"这回事。"""
-        return float(self.spec["max_speed"])
+        """空中不受地形影响：天空没有"这里难走"这回事。降级档（§5.17.11）
+        照乘——爬升/下降率不动，机动杀表达为水平速率上限收缩。"""
+        return float(self.spec["max_speed"]) * self._mobility_scale()
 
     def _waypoint_z(self, ref: Any, x: float, y: float) -> float:
         return float(self.spec["cruise_altitude"])

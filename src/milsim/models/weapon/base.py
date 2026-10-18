@@ -42,6 +42,7 @@ from ...errors import ConfigurationError
 from ...services.params import Params
 from ...services.type_registry import register_component
 from ..component import Component
+from ..damage import degrade
 from ..guidance.base import wrap180
 
 #: weapon_class 的合法取值（想定里写错装配期就报，带候选清单）。
@@ -103,7 +104,7 @@ class Weapon(Component):
         "dead_zone": Params.strings(default=()),
     }
 
-    __slots__ = ("_mount", "_stock", "_capacity", "_jobs", "_dead_zones")
+    __slots__ = ("_mount", "_stock", "_capacity", "_jobs", "_dead_zones", "_degrade")
 
     # -- 生命周期 ----------------------------------------------------------
 
@@ -111,6 +112,12 @@ class Weapon(Component):
         self._mount = mount
         self._capacity = int(self.spec["stock"])
         self._stock = self._capacity            # 开局满弹
+        #: 能力降级档（§5.17.11）：配置在平台属性上，``None`` = 未配置。
+        #: getattr 兜底同 mover——简装测试桩没有 platform_params 即无属性。
+        self._degrade = degrade.resolve(
+            getattr(mount, "platform_params", None) or {},
+            origin=self.describe(),
+        )
         #: 在身的 attack 任务：task_id → {'target': id, 'missiles': [弹id]}。
         #: 多个 attack 任务可并发（每项各盯各的弹），弹全终结即收工。
         self._jobs: dict[int, dict[str, Any]] = {}
@@ -197,11 +204,34 @@ class Weapon(Component):
             return None, f"目标 {raw!r} 不在这份想定里"
         return found.entity_id, ""
 
+    def _firepower(self) -> str:
+        """火力档样式（§5.17.11）：``ok`` / ``halved`` / ``down``。
+
+        档位是完好度的纯函数，每帧现查。``halved`` 表达为**一发耗 2 发弹**
+        （milsim 没有射速计时器，弹药效率减半是同一件事的现成账）；
+        ``down`` = 火力杀，拒发走指令回执，``Simulation.command`` 统一广播
+        ``command_rejected``（§5.18），任务层 attack 自然收到失败。
+        """
+        if self._degrade is None:
+            return "ok"
+        intact = self._mount.store.damage_of(self._mount.entity_id)
+        if intact <= 0.0:
+            return "down"
+        return self._degrade.firepower_mode(intact)
+
     def _fire(self, args: dict) -> tuple[bool, str]:
         me = self._mount.entity_id
 
-        if self._stock <= 0:
-            return False, f"弹药耗尽（{self._stock}/{self._capacity}），先 reload"
+        mode = self._firepower()
+        if mode == "down":
+            return False, "火力瘫痪（firepower_kill），拒发"
+        cost = 2 if mode == "halved" else 1
+        if self._stock < cost:
+            if self._stock <= 0:
+                return False, f"弹药耗尽（{self._stock}/{self._capacity}），先 reload"
+            return False, (
+                f"弹药不足：火力受损，一发耗 {cost} 发，现 {self._stock}——先 reload"
+            )
 
         tid, why = self._resolve_target(args)
         if tid is None:
@@ -223,8 +253,16 @@ class Weapon(Component):
         me = self._mount.entity_id
         store = self._mount.store
 
-        if self._stock <= 0:
-            return None, f"弹药耗尽（{self._stock}/{self._capacity}），先 reload"
+        mode = self._firepower()
+        if mode == "down":
+            return None, "火力瘫痪（firepower_kill），拒发"
+        cost = 2 if mode == "halved" else 1
+        if self._stock < cost:
+            if self._stock <= 0:
+                return None, f"弹药耗尽（{self._stock}/{self._capacity}），先 reload"
+            return None, (
+                f"弹药不足：火力受损，一发耗 {cost} 发，现 {self._stock}——先 reload"
+            )
 
         # ★ 敌我由想定态势判（§5.18 同 IFF 口径）：同方拒发——打自己人
         # 应该是想定写错了，响着失败比打出去强。
@@ -317,7 +355,7 @@ class Weapon(Component):
         if callable(wassign):
             wassign(tid)
 
-        self._stock -= 1
+        self._stock -= cost
         bus = self._mount.bus
         emit = getattr(bus, "weapon_fired", None)
         if emit is not None:

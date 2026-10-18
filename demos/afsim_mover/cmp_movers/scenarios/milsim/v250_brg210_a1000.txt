@@ -1,0 +1,39 @@
+# 生成：tools/cmp_movers.py · air_straight · v250_brg210_a1000
+simulation
+    name     "cmp v250_brg210_a1000"
+    max_step 0.1 s
+    seed     20261017
+end_simulation
+
+zone CMP_AREA
+    anchor     34.0 -83.17
+    radius     60 km
+    resolution 1 km
+    layers     1
+    terrain    flat
+end_zone
+
+component_type AIR_MOVER
+end_component_type
+component_type CMP_BODY : AIR_MOVER
+    max_speed           250 m/s
+    turn_rate           120 deg/s
+    radial_accel        100 m/s2
+    linear_accel        20 m/s2
+    angular_accel       80 deg/s2
+    vertical_accel      100 m/s2
+    climb_rate          200 m/s
+    descent_rate        200 m/s
+    altitude_tolerance  1 m
+    period              0.1 s
+end_component_type
+
+platform_type CMP_PLAT
+    side blue
+    component mover CMP_BODY
+    end_component
+end_platform_type
+
+platform P1 CMP_PLAT
+    position latlng 34.00000 -83.17000
+end_platform

@@ -129,11 +129,13 @@ from math import degrees, hypot, inf, radians, sin, sqrt
 from typing import Any, Sequence
 
 from ...engine import EventResult, PRIORITY_MOVER
+from ...errors import ConfigurationError
 from ...services.map import TERRAIN_NAMES
 from ...services.map.hex import Axial, heading_to_offset, offset_to_heading
 from ...services.map.nav import PROFILE_GROUND
 from ...services.params import Params
 from ..component import Component
+from ..damage import degrade
 
 #: 机动件的默认更新周期。与引擎的 2 s 栅栏错开，免得挤在同一时刻。
 MOVER_PERIOD_US = 5_000_000
@@ -289,12 +291,32 @@ class Mover(Component):
         "_fuel_cap",
         "_fuel_kg",
         "_task",
+        #: 能力降级档（§5.17.11）。``None`` = 未配置（全额，现状）。
+        "_degrade",
     )
+
+    #: 弹类（导弹/无控弹）置 ``False``：一发即死的目标存活状态只有两个点，
+    #: 降级没有插值余地——误配了降级键**装配期报错**，不静默忽略。
+    DEGRADE_ALLOWED = True
 
     # -- 生命周期 ----------------------------------------------------------
 
     def initialize(self, mount: Any) -> None:
         self.view = mount.mover_view()
+        # 能力降级档（§5.17.11）：配置在平台属性上（platform_type 上写即
+        # 按类下发，实例块就地覆盖）。弹类禁配——见 DEGRADE_ALLOWED。
+        # ★ getattr 兜底：MountContext 恒有 platform_params 字段，但测试
+        # 桩的简装 mount 没有——没有即视为"无平台属性"。
+        platform_params = getattr(mount, "platform_params", None) or {}
+        if not self.DEGRADE_ALLOWED and degrade.configured(platform_params):
+            raise ConfigurationError(
+                f"{self.type_name or type(self).__name__}: 弹类机动件不支持"
+                "能力降级（degradation* 键）——一发即死的目标没有中间状态，"
+                "把档配到载机/发射平台上"
+            )
+        self._degrade = degrade.resolve(
+            platform_params, origin=self.type_name or type(self).__name__
+        )
         #: 导航门面。装配层给的是 :class:`~milsim.services.map.nav.NavService`；
         #: 没有它（全球层、或测试里没装地图）就只能按点机动。
         self._nav = mount.nav
@@ -1133,11 +1155,24 @@ class Mover(Component):
         self.view.set_pose(x, y, z, heading, speed)
         self._last_speed = speed
 
+    def _mobility_scale(self) -> float:
+        """机动档比例（§5.17.11）：速度上限乘数，1.0 = 未降级/未配置。
+
+        档位是完好度的**纯函数**，每帧现查不缓存——``set_damage`` 之后
+        下一拍自动生效。死亡实体走不到这里（``_on_tick`` 先早退）。
+        """
+        if self._degrade is None:
+            return 1.0
+        return self._degrade.mobility_scale(self.view.my_damage())
+
     def _speed_at(self, ref: Any) -> float:
         """这一格上的速度。地形越难走越慢——**用寻路那张代价表的倒数**，
         不另立一张速度表（见 :meth:`~milsim.services.map.nav.NavService.move_factor`）。"""
         base = float(self.spec["max_speed"])
-        if base <= 0.0 or self._travel is None:
+        if base <= 0.0:
+            return base
+        base *= self._mobility_scale()
+        if self._travel is None:
             return base
         return base * self._nav.move_factor(ref, profile=self._travel)
 

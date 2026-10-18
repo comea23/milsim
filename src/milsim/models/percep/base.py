@@ -114,6 +114,7 @@ from ...services.ew import DEFAULT_SIDELOBE_LEVEL_DB, FalseTargetSpec
 from ...services.params import Params
 from ...services.store import IFF_FOE, IFF_FRIEND, IFF_UNKNOWN, phantom_id
 from ..component import Component
+from ..damage import degrade
 from . import equation as eq
 
 #: 第 5~8 步用的默认值。**都写成具名常量**，因为它们是"没写参数时雷达是
@@ -544,6 +545,7 @@ class RadarSensor(Component):
         "_track_pd",
         "capacity_blocked",
         "track_skipped",
+        "_degrade",
     )
 
     # -- 生命周期 ----------------------------------------------------------
@@ -685,11 +687,30 @@ class RadarSensor(Component):
         #: 是 ``inf`` ⇒ 那条判据恒真、等于不判。
         self._nearest_phantom_m = float("inf")
 
+        # 探测杀档（§5.17.11）：配置在平台属性上，None = 未配置（全额）。
+        # getattr 兜底同 mover——简装测试桩没有 platform_params 即无属性。
+        self._degrade = degrade.resolve(
+            getattr(mount, "platform_params", None) or {},
+            origin=self.type_name or type(self).__name__,
+        )
+
         mount.every(self.spec["beam_step"], self._sweep, PRIORITY_SENSOR)
         if self._track_interval_us > 0:
             #: 专用跟踪波束是**独立于扫掠的第二事件源**：扫掠管"搜索 + 顺路
             #: 更新"，这个节拍管"插空回访已建航的目标"（§5.12.11）。
             mount.every(self._track_interval_us, self._track_tick, PRIORITY_SENSOR)
+
+    def _sensor_state(self) -> float:
+        """探测杀档的**线性**灵敏度因子（§5.17.11）。1.0 = 未降级/未配置。
+
+        档位是完好度的纯函数，每帧现查。关机档返回 0.0——``_sweep``/
+        ``_track_tick`` 先用它早退（不烧波位、不出航迹），纯读数口
+        （``single_pulse_snr``）则直接把 SNR 打到 0。
+        """
+        if self._degrade is None:
+            return 1.0
+        factor = self._degrade.sensor_factor(self.view.my_damage())
+        return 0.0 if factor is None else factor
 
     def _require_beam_width(self) -> None:
         """固定指向（``fov == 0``）不许配零宽波束：那台雷达什么都照不到。
@@ -1850,6 +1871,11 @@ class RadarSensor(Component):
                 sn *= steer_gain
         # ``sn <= 0`` 时不必（也不能）折算：``J/S`` 里那个 "∞ × 0" 会给 nan，
         # 而一个 nan 信噪比会顺着一整条链路传下去。没有信号就没有 J/S 可言。
+        # 探测杀档（§5.17.11）只折**信号**账：S 缩小、J/N 不动——代数上
+        # 恰好是 S/(N+J) 里 S 一项缩水，灵敏度变差这同一件事，不用另记账。
+        factor = self._sensor_state()
+        if factor != 1.0 and isfinite(sn) and sn > 0.0:
+            sn *= factor
         if jammer_noise_w <= 0.0 or sn <= 0.0:
             return sn
         return eq.snr_under_jamming(
@@ -1961,6 +1987,11 @@ class RadarSensor(Component):
     # -- 主循环 ------------------------------------------------------------
 
     def _sweep(self, engine, event) -> EventResult:
+        # 探测杀关机档（§5.17.11）：不发波、不推进相位、不出航迹——残骸
+        # 雷达连"看起来在工作"都不该。档位是完好度纯函数，摧毁（归 0）
+        # 不再恢复，相位时钟停着没有后果。
+        if self._sensor_state() <= 0.0:
+            return EventResult.RESCHEDULE
         # 本帧转过的角度**按真实经过的时间**算，不用名义步长。引擎允许事件
         # 被推迟（栅栏截断、同刻排队），按名义步长算会把这部分时间丢掉；
         # 相位一旦落后，慢转速雷达再也补不回来（每拍都少一点，永不闭合）。
@@ -2025,6 +2056,9 @@ class RadarSensor(Component):
         "保强弃弱"）。被跳过**不**算漏检：波束没指向它，与"没扫到"同账。
         """
         self._now_us = float(engine.now)
+        # 探测杀关机档（§5.17.11）：专用波束与扫掠同生共死。
+        if self._sensor_state() <= 0.0:
+            return EventResult.RESCHEDULE
         if not self._tracks:
             return EventResult.RESCHEDULE
         me = self.view.my_position()

@@ -1,0 +1,90 @@
+# =============================================================================
+# 能力降级（三杀模型）：毁伤 → 能力包络（§5.17.11，v0.13.65）
+#
+# 两枚弹道弹先后命中同一辆"装甲车"：目标**不死**，但完好度跌破阈值后按
+# 档降级——机动 60%、火力半残（一发耗 2 发弹）、探测灵敏度 −6 dB。
+#
+# ── 想定写法 ────────────────────────────────────────────────────────────────
+#   · 降级配置挂在**平台属性**上（与 max_health/armor 同一张表）。写在
+#     platform_type 上就是"按类统一设置"（沿继承链下发到所有实例）；
+#     写在 platform 实例块就地覆盖；什么都不写 = 不降级直到完全损毁。
+#   · 本想定给 TGT_DEGRADE 写 `degradation armored`（内置档：0.5/0.2
+#     两道阈值）。自定义写法：
+#       degradation custom
+#       mobility_scale 1.0 0.5 0.2
+#       degradation_thresholds 0.6 0.25
+#       firepower_tiers ok halved down
+#       sensor_penalty_db "0" "-8" off
+#     （探测档数值要带引号——参数表按字符串列表收，off = 该档关机。）
+#   · 弹类（导弹/无控弹）**禁配**降级：一发即死的目标没有中间状态，
+#     误配装配期报错。
+#
+# ── 预期结果（tests/test_degrade.py 逐位钉住）──────────────────────────────
+#   目标 max_health 1.6，每发默认链 0.5 点（×armor 1.0）= 完好度 −0.3125：
+#   第一发命中后完好度 1.0 → 0.6875（> 0.5，完好档，行为不变）；
+#   第二发命中后 0.6875 → 0.375（0.2 < 0.375 ≤ 0.5 → **重损档**）：
+#   速度上限 ×0.6、开火每发耗 2 发弹、雷达灵敏度 −6 dB。
+#   目标**仍然存活**（完好度 > 0）：还能被打、还在编队占位——
+#   "丧失战斗力" ≠ "被摧毁"。档位是完好度的纯函数：set_damage 之后
+#   下一拍自动生效，不缓存、不落账。
+# =============================================================================
+
+component_type ANALYTIC_BALLISTIC_MOVER
+end_component_type
+
+component_type AIR_MOVER
+end_component_type
+
+component_type WARHEAD
+end_component_type
+
+component_type SRBM_WH : ANALYTIC_BALLISTIC_MOVER
+    target_name     TGT_DEGRADE
+    apogee_altitude 200 km
+end_component_type
+
+component_type WH_CHIP : WARHEAD
+    target_name    TGT_DEGRADE
+    fuse_radius    5 km
+    check_interval 1 s
+end_component_type
+
+platform_type SRBM_LAUNCHER
+    side blue
+    component mover SRBM_WH
+    end_component
+    component damage WH_CHIP
+    end_component
+end_platform_type
+
+# 目标：装甲车类。降级档写在**类型**上 = 按类统一设置——同类型的
+# 其它实例自动继承；只想改某一辆，在它的 platform 块里写覆盖键。
+platform_type AIM_ARMORED
+    side red
+    max_health 1.6
+    degradation armored
+    component mover AIR_MOVER
+    end_component
+end_platform_type
+
+zone WH_RANGE
+    anchor     39.05 -89.80
+    radius     1000 km
+    resolution 2 km
+    layers     1
+    terrain    flat
+end_zone
+
+platform SRBM_1 SRBM_LAUNCHER
+    position latlng 39.0500 -89.8000
+    heading          0 deg
+end_platform
+
+platform SRBM_2 SRBM_LAUNCHER
+    position latlng 39.0500 -89.8000
+    heading          0 deg
+end_platform
+
+platform TGT_DEGRADE AIM_ARMORED
+    position latlng 44.4500 -89.8000
+end_platform

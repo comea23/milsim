@@ -30,22 +30,32 @@
 所以"换一种弹 = 换一张表"这句话有个前提：**弹体拉得动这张表要的机动**。
 表与弹体是配套的，不是随便配。
 
-不做的两样
-----------
-1. **航路跟随**（§9-31）。原脚本在 CRUISE 段写 ``allow_route_following
-   true``，配 mover 里两个预规划航路点。我们这里用"航向指目标"代替——
-   那是"没做横向规划"的默认行为，**不是等价的**。
-2. **俯仰角上限**（§9-35）。原脚本写 ``maximum_pitch_angle 50 deg``，
-   我们没有"倾角上限"这一层。
+不做的两样（**v0.13.66 起都补上了**）
+------------------------------------
+1. ~~**航路跟随**（§9-31）~~ ⇒ 补上：:data:`ASM_ROUTE_PHASES` 把巡航段的水平律
+   换成 ``route``（v0.13.63 的途径点律），注册名 :class:`RouteAsmGuidance`
+   （``ROUTE_ASM_GUIDANCE``）。途径点序列写在制导件的 ``route`` 参数里
+   （想定里在 guidance 组件块赋值，平面坐标米），按序飞完后自动转回追踪
+   目标——与参照"先走完 mover 里的 route、再转向目标"同一形状。巡航段的
+   交接条件仍是 ``range < 3 km``：航路没走完但目标已近，照切 POPUP（参照
+   的 ``next_phase POPUP when target_slant_range < 3000 m`` 也是这么写的）。
+2. ~~**俯仰角上限**（§9-35）~~ ⇒ 补上：:class:`~milsim.models.guidance.contract.Phase`
+   新增 ``max_pitch_angle``（度，只认定高律），定高律的垂直速率指令被钳到
+   ``±v·sin(限值)``——与参照 ``maximum_pitch_angle 50 deg`` 同一语义
+   （对称、作用于定高程序）。路线表的巡航段带着 ``50.0``；无航路的
+   :class:`AsmGuidance` 保持旧表逐字不变。
 """
 
 from __future__ import annotations
+
+from dataclasses import replace
 
 from ...services.params import Params
 from ...services.type_registry import register_component
 from .base import GuidanceComputer
 from .contract import (
     HORIZ_PN,
+    HORIZ_ROUTE,
     HORIZ_TARGET,
     VERT_PN,
     Phase,
@@ -54,8 +64,8 @@ from .contract import (
 
 #: 反舰弹的阶段表。**换掉它就是另一种弹**（这就是"phase 作为组件参数"的意思）。
 ASM_PHASES: tuple[Phase, ...] = (
-    # 巡航段：贴地 75 m、240 m/s（原脚本的 537 mph）。原脚本这一段还跟着
-    # 两个预规划航路点，我们只能直扑——差的那 18 km 航迹全在这里（§9-31）。
+    # 巡航段：贴地 75 m、240 m/s（原脚本的 537 mph）。航向指目标直扑——
+    # 要沿预规划航路飞用下面的 ASM_ROUTE_PHASES（v0.13.66）。
     Phase(
         "CRUISE",
         until=Until.below("range", 3_000.0),
@@ -103,4 +113,44 @@ class AsmGuidance(GuidanceComputer):
     }
 
 
-__all__ = ["ASM_PHASES", "AsmGuidance"]
+#: 途径点反舰弹的阶段表（v0.13.66，§9-31/§9-35）：与 :data:`ASM_PHASES`
+#: 差两处——巡航段水平律 ``target`` → ``route``（沿制导件 ``route`` 参数的
+#: 途径点飞，走完转回追踪目标），且巡航段带 ``max_pitch_angle 50``（参照
+#: 脚本的 ``maximum_pitch_angle 50 deg``：高空发射转入贴海时俯冲角被夹在
+#: 50°，而不是定高律按"高度差 × 增益"算出的近乎垂直下扎）。POPUP / DIVE
+#: 两段照旧——参照的俯仰限位也只写在 CRUISE 段。
+ASM_ROUTE_PHASES: tuple[Phase, ...] = (
+    replace(
+        ASM_PHASES[0],
+        horizontal=HORIZ_ROUTE,
+        max_pitch_angle=50.0,
+    ),
+    ASM_PHASES[1],
+    ASM_PHASES[2],
+)
+
+
+@register_component("ROUTE_ASM_GUIDANCE")
+class RouteAsmGuidance(AsmGuidance):
+    """途径点反舰弹：贴海巡航（沿 ``route`` 途径点）+ 末段跃升俯冲。
+
+    与 :class:`AsmGuidance` 只差默认表里那一个水平律与巡航段的俯仰限位。
+    ``route`` 留空会在装配期报错（基类初始化的检查）；途径点的几何语义
+    （半径内算过点、转弯受过载限制）见
+    :data:`~milsim.models.guidance.contract.HORIZ_ROUTE`。
+    """
+
+    __slots__ = ()
+
+    PARAMS = {
+        **AsmGuidance.PARAMS,
+        "phases": Params.phases(ASM_ROUTE_PHASES),
+    }
+
+
+__all__ = [
+    "ASM_PHASES",
+    "ASM_ROUTE_PHASES",
+    "AsmGuidance",
+    "RouteAsmGuidance",
+]
