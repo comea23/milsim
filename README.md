@@ -12,13 +12,13 @@
 ### 功能特性
 
 - **离散事件引擎**：固定步长 + 事件队列 + 消息收件箱，支持批量并行推演（`services/orchestrator`）
-- **运载器**：空中 / 地面（轮式、履带）/ 水面 / 水下 / 导弹（弹道、巡航、反舰，带制导件）；巡航弹支持途径点航线（`ROUTE_CRUISE_GUIDANCE` + `route` 参数，按序过点后自动转末段导引）；反舰弹同款途径点航线 + 定高段俯仰角上限（`ROUTE_ASM_GUIDANCE` / `Phase.max_pitch_angle`，v0.13.66）
+- **运载器**：空中 / 地面（轮式、履带）/ 水面 / 水下 / 导弹（弹道、巡航、反舰、地空，带制导件）；巡航弹支持途径点航线（`ROUTE_CRUISE_GUIDANCE` + `route` 参数，按序过点后自动转末段导引）；反舰弹同款途径点航线 + 定高段俯仰角上限（`ROUTE_ASM_GUIDANCE` / `Phase.max_pitch_angle`，v0.13.66）；地空弹专用四段阶段表（`SAM_GUIDANCE`：垂直发射→程序转弯→定高巡航→末段双轴比例导引，v0.13.67）
 - **雷达探测**：雷达方程 → SNR → Pd（Swerling 起伏 + Marcum Q）、波束扫描相位制、地平线与通视判决、航迹管理（M/N 建航）、按精度逆方差加权融合（σ 收缩）、俯仰视场与电子扫描损失（相控阵斜视衰减，内置 AN/SPY-1D / SPY-6(V)1 型号）、TWS 航迹容量与专用跟踪波束（电扫回访 + 波束时间账本，跟踪帧率与搜索解耦）
 - **通信网**：多网络组网、链路判通（SNR 判据）、航迹报文分发、掉线与延迟
 - **电子战**：压制干扰（S/(N+J) 判据、极化失配）、干扰守门与被压标注
 - **决策**：规则决策器 + LLM 决策器（可接任意 OpenAI 兼容接口），任务编排（Task / Intent / Ledger）
 - **毁伤与武器**：战斗部命中判定（引信圈 + 最近点穿越插补、标称点数 / 装甲折扣）；**能力降级（三杀模型）**——存活目标按完好度阶梯降级机动 / 火力 / 探测三通道（M-kill / F-kill / S-kill），按类统一设置（platform_type 继承下发）、不配置则不降级，导弹类装配期禁配；武器组件（发射 / 装填、包线与阵营检查、运行期生成弹实体并交接目标）；补给组件（补弹补油）与机动油料模型
-- **实体命令层**：`sim.command(实体id, 指令, 参数)` 统一入口——指令下到实体、按挂载顺序分发到组件（`move / stop / fire / reload / resupply`）
+- **实体命令层**：`sim.command(实体id, 指令, 参数)` 统一入口——指令下到实体、按挂载顺序分发到组件（`move / stop / fire / reload / resupply`）；雷达运行期开关 `sensor on/off`（EMCON 静默：停照射、停建新航迹、己方航迹冻结，v0.13.67）
 - **自主任务层**：任务管理器组件（双账本 + 四消息族走通信网 + 可靠重传 + 一对多指派），六类任务（attack / move / track / jam / comm / resupply）由挂载组件按声明认领执行，目标注销自动收尾
 - **人在回路**：WebSocket 双向通道——上行指令（`route / goto / stop / pace / fire / resupply / assign_task / cancel_task`）+ 逐条 ack 回执 + 可控实体清单，浏览器里点选实体实时操控
 - **地图**：经纬度与 H3 六边形双坐标系、战区网格、通视（LOS）、A* 寻路
@@ -123,6 +123,18 @@ python tools/serve_replay.py ...
 - 卫星底图：NASA Blue Marble Next Generation（公有领域）
 - 部分设计口径参照 AFSIM 2.9 开源架构研读笔记，代码为独立实现
 
+### 域七·Jeff 决策模型接入（v0.13.67，2026-10-20）
+
+milsim 态势 → Jeff（firelex/jeff，Qwen3.5-0.8B 决策小模型）判断层，用于红蓝智能蓝军框架：
+
+- `tools/jeff_probe.py`：zero-shot/适配器探针。`--extract` 用 milsim 真实弹道（`cmp_movers._asm_cfgs()[0]` + comm_track_jam 巡航平移）采 7 组特征；`--probe [--model 名]` 发 30 题（6 问类×采样点：意图/交战授权/阶段/电磁/剖面/末段），真值规则写死在 `truth()`。判分口径=选项键直接比对（选项键必须语义短名，禁裸数字）。
+- `tools/jeff_makedata.py`：域内适配器训练数据合成（12 000 行 / 48 family，纯标准库）。真值=同一套 `truth()` 规则；按标签分层逆采样保证均衡；8 套态势模板×IFF 友敌 70/30×选项序洗牌防 shortcut；行格式=adapter-kit `rows.jsonl`。产出经 jeff-kit check-rows/split/leak-check/shortcut-report 全过。
+- 训练：`jeff-train --lora-rank 16 --lr 1e-4`（1 epoch，122 步，RTX 5080 约 10 分钟；复用 `F:\ue_client\AdvCAM\.venv_p3d` 的 torch 2.13.0+cu130 + peft 0.21.1）。开发集（留出 family）accuracy 97.28% / ECE 0.007。
+- 结果：真实弹道探针 zero-shot 56.7%（ECE 0.33）→ 适配器 `aaw-defend` 83.3%（ECE 0.087）；auth/em/terminal 100%，intent 57%（|closing|≤5 边界样本属标签模糊区）。
+- 服务：`JEFF_CHECKPOINT=E:/Jeff-Qwen3.5-0.8B JEFF_ADAPTERS=<adapters 目录> JEFF_ADAPTER_MODE=merged PORT=8765 python -m jeff.server`（jeff 源码 `E:\jeff-repo`，已打 py3.10 兼容补丁）。
+- 产物：`demos/jeff/`（特征/数据/切分/适配器/训练日志）。
+- **第一轮推演 + 白方评判（v0.13.67，2026-10-22）**：金标准场景 `demos/jeff/scenario_growler_vs_growler.md`（源自 CMO 想定，`tools/cmo_scen_decode.py` 解密）→ 等效想定 `demos/jeff/growler_eq.txt`（2×电子战机 vs SAM 阵地+地空弹）→ 驱动 `demos/jeff/first_round.py`（红蓝各挂 Jeff：蓝每 5s 问 phase/em/engage_auth，红每 60s 问 intent/profile；语义键+适定性+敌我过滤+射击冷却）。首轮缺口 G1/G2 已补：雷达运行期开关（`sensor on/off`，em 决策经它执行，§5.18）+ 地空制导阶段表（`SAM_GUIDANCE`，§5.8）。复跑 700 s：152 拍 0 兜底（红蓝均 0），t=240 s 建航、干扰致盲 425 s，2 发 1 中（击伤 0.5，第二发截止时在飞——包线边沿能量耗尽，爬行收敛）。白方评判 `demos/jeff/white_judge.py`：第二个 Jeff **纯底座**实例（端口 8766，不挂适配器、独立于红蓝）zero-shot 做 L1 noul 四问（roe/ew/chain/credible，<0.60 记 uncertain 不猜），配 L0 机械标尺（可复算）与 L2 金标准验收；报告 `demos/jeff/output/white_judge.md`（三成立一无法判定）。缺口清单见 `demos/jeff/first_round_gap.md`（G8 计分终局层待拍板）。复现：先起两个 Jeff 服务（8765 挂 aaw-defend + 8766 纯底座），再 `python demos/jeff/first_round.py && python demos/jeff/white_judge.py`。
+
 ## License
 
 以 [MIT](LICENSE) 发布——可自由使用、修改、分发（保留版权声明即可）。
@@ -139,13 +151,13 @@ python tools/serve_replay.py ...
 ### Features
 
 - **Discrete-event engine**: fixed time step + event queue + message inboxes; batch parallel runs via the orchestrator
-- **Movers**: air, ground (wheeled / tracked), surface, subsurface, and missiles (ballistic, cruise, anti-ship, with guidance components); cruise missiles fly waypoint routes (`ROUTE_CRUISE_GUIDANCE` + `route` param, auto hand-over to terminal guidance after the last waypoint); anti-ship missiles get the same waypoint route plus a pitch-angle cap on the altitude-hold segment (`ROUTE_ASM_GUIDANCE` / `Phase.max_pitch_angle`, v0.13.66)
+- **Movers**: air, ground (wheeled / tracked), surface, subsurface, and missiles (ballistic, cruise, anti-ship, surface-to-air, with guidance components); cruise missiles fly waypoint routes (`ROUTE_CRUISE_GUIDANCE` + `route` param, auto hand-over to terminal guidance after the last waypoint); anti-ship missiles get the same waypoint route plus a pitch-angle cap on the altitude-hold segment (`ROUTE_ASM_GUIDANCE` / `Phase.max_pitch_angle`, v0.13.66); surface-to-air missiles use a dedicated four-phase table (`SAM_GUIDANCE`: vertical launch → pitch-over → altitude cruise → terminal dual-axis proportional navigation, v0.13.67)
 - **Radar detection**: radar equation → SNR → Pd (Swerling fluctuations + Marcum Q), phase-based beam sweep, horizon and line-of-sight tests, track management (M/N criteria), accuracy-weighted track fusion (inverse-variance, σ shrinkage), elevation field of view and electronic scan loss (phased-array off-boresight falloff, with AN/SPY-1D / SPY-6(V)1 model entries), TWS track capacity and dedicated track beam (electronically-steered revisit with a beam-time ledger, decoupling track rate from search)
 - **Communication networks**: multi-net composition, link budget (SNR criterion), track-message dissemination, dropouts and latency
 - **Electronic warfare**: stand-in jamming with the S/(N+J) criterion and polarization mismatch, jam gating and suppressed-radar annotation
 - **Decision**: rule-based and LLM planners (any OpenAI-compatible endpoint), task orchestration (Task / Intent / Ledger)
 - **Damage & weapons**: warhead hit adjudication (fuse radius + closest-point crossing interpolation, nominal damage points / armor factor); **capability degradation (three-kill model)** — surviving targets step down mobility / firepower / sensor channels by intactness (M-kill / F-kill / S-kill), configurable per class via platform-type inheritance, off by default, missiles rejected at assembly; weapon component (fire / reload, envelope and side checks, runtime missile spawning with target hand-off); supply component (ammo & fuel) and mover fuel model
-- **Entity command layer**: one entry point `sim.command(entity_id, cmd, args)` — commands go to the entity and dispatch to components by mount order (`move / stop / fire / reload / resupply`)
+- **Entity command layer**: one entry point `sim.command(entity_id, cmd, args)` — commands go to the entity and dispatch to components by mount order (`move / stop / fire / reload / resupply`); runtime radar on/off via `sensor on/off` (EMCON silence: stop illuminating, stop building new tracks, own tracks freeze, v0.13.67)
 - **Autonomous task layer**: task-manager component (dual ledgers + four message families over the comm network + reliable retransmission + one-to-many assignment); six task types (attack / move / track / jam / comm / resupply) claimed by mounted components via a declaration protocol, with auto-resolution when targets die
 - **Human-in-the-loop**: bidirectional WebSocket — uplink commands (`route / goto / stop / pace / fire / resupply / assign_task / cancel_task`), per-command acks, and a controllables list for live control from the browser
 - **Map**: lat/lng and H3 hex coordinates, zone grids, line-of-sight, A* pathfinding

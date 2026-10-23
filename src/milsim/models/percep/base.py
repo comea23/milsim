@@ -224,7 +224,25 @@ class RadarSensor(Component):
 
     SLOT_HINT = "sensor"
 
+    #: 运行期指令（v0.13.67，§5.18）：**辐射开关**（EMCON）。
+    #:
+    #: 想定只给能力（``emitting`` 定初始态），开不开机是运行期的事——由决策
+    #: 模型 / 人在回路经 ``Entity.command(实体, "on"/"off")`` 下达，实体按
+    #: 挂载顺序找到本部件执行。关机语义（与探测杀关机档同款早退）：
+    #: **不照射**——不发波、不建新航迹、己方干扰账上也没有它的辐射；已建
+    #: 航迹**冻结**在最后一次更新（M/N 窗口按照射次数计，没有时间老化那一
+    #: 维，见 :meth:`_update_track`）。航迹还新不新由调用方看 ``age``。
+    COMMANDS = {
+        "on": "开机：恢复辐射与探测（想定 emitting 定的初始态之后的切换）",
+        "off": "关机：停止辐射（EMCON）——不照射、不建新航迹，已有航迹冻结",
+    }
+
     PARAMS = {
+        # -- 运行期开关 ------------------------------------------------------
+        #: **初始辐射态**（v0.13.67）。``false`` = 出厂/出塞即静默（EMCON
+        #: 起步的警戒雷达），之后由运行期指令 ``on``/``off`` 切换，见
+        #: :attr:`COMMANDS`。默认 ``true`` ⇒ 历史想定逐字不变。
+        "emitting": Params.boolean(True),
         # -- 第 1~3 步：扫描 --------------------------------------------------
         "detect_range": Params.distance(30_000.0, minimum=0.0),
         "scan_interval": Params.duration(2_000_000, minimum=1_000),
@@ -601,6 +619,10 @@ class RadarSensor(Component):
         self.ticks = 0
         self.contacts_seen: list[int] = []
         self._last_us = float(mount.now)
+        #: 运行期辐射开关（v0.13.67）。基类的 ``enabled`` 槽位（"被击伤后
+        #: 关机"那一套）在这里接上想定初始态与 on/off 指令——闸门只有两处：
+        #: :meth:`_sweep` 与 :meth:`_track_tick` 的开头。
+        self.enabled = bool(self.spec["emitting"])
 
         self.detect_range_m = float(self.spec["detect_range"])
         self.antenna_height_m = float(self.spec["antenna_height"])
@@ -1992,6 +2014,12 @@ class RadarSensor(Component):
         # 不再恢复，相位时钟停着没有后果。
         if self._sensor_state() <= 0.0:
             return EventResult.RESCHEDULE
+        # 运行期关机（v0.13.67，EMCON）：同款早退，且**刻意不更新
+        # ``_last_us``**——重新开机后第一拍按真实经过的时间算转角，一次扫过
+        # 整个静默期没照过的扇区（那段本来就什么也没照到）。相位时钟停着
+        # 没有后果，与探测杀同一条理由。
+        if not self.enabled:
+            return EventResult.RESCHEDULE
         # 本帧转过的角度**按真实经过的时间**算，不用名义步长。引擎允许事件
         # 被推迟（栅栏截断、同刻排队），按名义步长算会把这部分时间丢掉；
         # 相位一旦落后，慢转速雷达再也补不回来（每拍都少一点，永不闭合）。
@@ -2059,6 +2087,9 @@ class RadarSensor(Component):
         # 探测杀关机档（§5.17.11）：专用波束与扫掠同生共死。
         if self._sensor_state() <= 0.0:
             return EventResult.RESCHEDULE
+        # 运行期关机（v0.13.67）：专用波束与扫掠同生共死——电扫也是辐射。
+        if not self.enabled:
+            return EventResult.RESCHEDULE
         if not self._tracks:
             return EventResult.RESCHEDULE
         me = self.view.my_position()
@@ -2089,6 +2120,27 @@ class RadarSensor(Component):
             self._evaluate(engine, me, target_id, True, ())
             served += 1
         return EventResult.RESCHEDULE
+
+    # -- 运行期指令（v0.13.67，§5.18） --------------------------------------
+
+    def execute(self, cmd: str, args: dict) -> tuple[bool, str]:
+        """辐射开关。语义见 :attr:`COMMANDS` 与 PARAMS 里 ``emitting``：
+        关机只停"照射"——不注销事件、不清航迹、不动相位时钟之外的状态。
+        """
+        ok, why = super().execute(cmd, args)
+        if not ok and cmd not in self.COMMANDS:
+            return ok, why
+        if cmd == "on":
+            if self.enabled:
+                return True, f"{self.describe()} 已在辐射"
+            self.enabled = True
+            return True, f"{self.describe()} 开机：恢复辐射与探测"
+        if cmd == "off":
+            if not self.enabled:
+                return True, f"{self.describe()} 已在关机状态"
+            self.enabled = False
+            return True, f"{self.describe()} 关机：停止辐射，航迹冻结"
+        return False, f"指令 {cmd!r} 没有实现"
 
     def _lit_arcs(
         self, arcs: list[tuple[float, float]]

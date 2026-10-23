@@ -1,4 +1,4 @@
-"""制导件包：一个基类 + 三个参考实现，**各自一个文件**（§5.8）。
+"""制导件包：一个基类 + 四个参考实现，**各自一个文件**（§5.8）。
 
 .. code-block:: text
 
@@ -10,17 +10,20 @@
     │                  RouteCruiseGuidance ROUTE_CRUISE_GUIDANCE  途径点巡航
     ├── asm.py         AsmGuidance       ASM_GUIDANCE             跃升俯冲剧本
     │                  RouteAsmGuidance  ROUTE_ASM_GUIDANCE       途径点反舰
-    └── ballistic.py   BallisticGuidance BALLISTIC_GUIDANCE       弹道剧本
+    ├── ballistic.py   BallisticGuidance BALLISTIC_GUIDANCE       弹道剧本
+    └── sam.py         SamGuidance       SAM_GUIDANCE             地空剧本
 
 组织约定与 :mod:`milsim.models.mover` 一样：**清单只有一份**（下面那个
 元组），:data:`milsim.models.FRAMEWORK_COMPONENTS` 直接展开它，不另抄一遍。
 
-**为什么是三个类、而不是每种弹一个**：轨迹形态的差异在 ``phases`` 这张表
+**为什么是四个类、而不是每种弹一个**：轨迹形态的差异在 ``phases`` 这张表
 里，不在算法里。"换一种弹"= 换一张表（或者换派生类里的一个默认值），而
-不是换一个类。分成三个，是因为它们连**律的用法**都不一样：巡航弹全程制导、
+不是换一个类。分成四个，是因为它们连**律的用法**都不一样：巡航弹全程制导、
 反舰弹末段还要靠"看目标的角度"切段（要 ``target_elevation``）、弹道弹中段
-干脆把关掉制导。**表与弹体是配套的**——反舰那张表要弹体拉得出 4.6 g，
-换表不看弹体的话会得到一条"从目标头顶 750 m 掠过"的假航迹（``asm.py``）。
+干脆把关掉制导（自由飞）、地空弹中段必须**定高**（目标在天上，自由飞的弧线
+从它头顶掠过去）。**表与弹体是配套的**——反舰那张表要弹体拉得出 4.6 g，
+地空那张要 12 g，换表不看弹体的话会得到一条假航迹（``asm.py``、``sam.py``
+的模块头各有一笔实测账）。
 """
 
 from __future__ import annotations
@@ -46,6 +49,7 @@ from .contract import (
 )
 from .asm import ASM_PHASES, ASM_ROUTE_PHASES, AsmGuidance, RouteAsmGuidance
 from .cruise import CRUISE_PHASES, CRUISE_ROUTE_PHASES, CruiseGuidance, RouteCruiseGuidance
+from .sam import SAM_PHASES, SamGuidance
 
 #: 框架自带的制导件。想定里可以直接写这些注册名，不需要额外声明。
 #: **加组件只改这一处**（外加新组件自己的那个文件）。
@@ -55,6 +59,7 @@ FRAMEWORK_GUIDANCE: tuple[type, ...] = (
     CruiseGuidance,
     RouteCruiseGuidance,
     RouteAsmGuidance,
+    SamGuidance,
 )
 
 __all__ = [
@@ -90,6 +95,8 @@ __all__ = [
     "CRUISE_ROUTE_PHASES",
     "CruiseGuidance",
     "RouteCruiseGuidance",
+    "SAM_PHASES",
+    "SamGuidance",
     # -- 清单 --
     "FRAMEWORK_GUIDANCE",
 ]

@@ -1,0 +1,174 @@
+# Jeff 框架第一轮推演想定：电子战压制 vs 要地防空（Growler vs Growler 等效）
+#
+# 金标准：demos/jeff/scenario_growler_vs_growler.md（CMO Growler Vs. Growler, 2014）
+#   蓝方（红方在 milsim 侧）= 5×EA-18G 电子战攻击机 → 本等效取 2 架
+#   红方（蓝方在 milsim 侧）= S-400 营 + P-37 警戒雷达 → 本等效取 1 处 SAM 阵地
+#   （雷达 + 导弹一体，P-37 远程警戒雷达的"远距离发现"由 SAM 雷达的搜索段代替）
+#
+# 比例压缩：CMO 原版双方相距 ~550 km（防区外发射包线）；milsim 侧缩到 60 km
+# 进场，让"探测→跟踪→决策→发射→拦截→计分"整条链能在 700 s 推演内闭合。
+# 电子战是核心变量：干扰机与蓝方雷达同频（4 GHz），J/S 随距离动态变化。
+#
+# 运行期决策（driver: first_round.py）：
+#   蓝方（SAM 阵地）每 5 s 问 Jeff：engage_auth（开火/保持）+ em（雷达辐射管制）
+#   红方（干扰机）每 60 s 问 Jeff：profile（高度带）+ intent（继续/保持/撤）
+#   ★ em 决策经 sensor on/off 指令执行（v0.13.67，§5.18）；导弹用 SAM_GUIDANCE
+#     （v0.13.67 地空阶段表）
+#
+# ★ 想定里不写命令（milsim 约定：想定只给能力，任务运行期下达）
+
+simulation
+    name     "Growler 等效：EW 压制 vs 要地防空"
+    max_step 0.5 s
+    seed     20261022
+end_simulation
+
+# ---- 机动件 ----
+component_type AIR_MOVER
+end_component_type
+
+component_type AIR_MEDIUM : AIR_MOVER
+    max_speed       150 m/s
+    turn_rate       12 deg/s
+    radial_accel    9.4 m/s2
+    cruise_altitude 3000 m
+end_component_type
+
+# ---- 感知件引入（框架类名不能直接当父类型，先空块引入再派生）----
+component_type HEX_SEARCH_RADAR
+end_component_type
+
+# ---- 蓝方 SAM 阵地搜索雷达（S-400 等效火控/搜索雷达）----
+# ★ 与干扰机同频（4 GHz）是压制生效的前提：频点不落带内 = 零辐射（§5.14）。
+# ★ detect_range 22 km：标称 Pd=0.5 的点。红机 RCS 10 m² ⇒ 单发有效探测
+#   ~38 km（(22×10^0.25)≈39）——远距干净跟踪，进 25 km（干扰机自载雷达
+#   视距）后被压制，烧穿/掉航迹的转折看得见。
+# ★ peak_power 10 MW：战术防空雷达量级。干扰机 100 kW@30 dBi 压不压得动，
+#   正是第一轮要看的数。
+component_type SAM_RADAR : HEX_SEARCH_RADAR
+    detect_range    22 km
+    max_range       40 km
+    scan_interval   4 s
+    fov             360 deg
+    antenna_height  10 m
+    required_pd     0.5
+    hits_to_establish 3
+    establish_window  5
+    hits_to_maintain  2
+    maintain_window   5
+    peak_power      10 MW
+    antenna_gain_db 30
+    frequency       4 GHz
+    bandwidth       2 MHz
+    swerling_case   1
+end_component_type
+
+# ---- 红方电子战飞机的自载搜索雷达（9 GHz：避开己方干扰带，防自扰）----
+component_type EW_RADAR : HEX_SEARCH_RADAR
+    detect_range    25 km
+    max_range       35 km
+    scan_interval   4 s
+    fov             360 deg
+    antenna_height  0
+    required_pd     0.5
+    hits_to_establish 3
+    establish_window  5
+    hits_to_maintain  2
+    maintain_window   5
+    peak_power      10 MW
+    antenna_gain_db 25
+    frequency       9 GHz
+    bandwidth       2 MHz
+end_component_type
+
+# ---- 平台类型 ----
+# 蓝方 SAM 阵地（地面固定，不挂运动件——z 恒为地形高程）
+platform_type SAM_SITE
+    side blue
+    radar_cross_section 50 m2
+    component sensor SAM_RADAR
+    end_component
+    component track TRACK_MANAGER
+    end_component
+    component weapon WEAPON
+        weapon_type SAM_MISSILE
+        range_max   45 km
+        stock       6
+    end_component
+end_platform_type
+
+# 红方电子战攻击机（EA-18G 等效）：自载雷达（找目标）+ 干扰机（压蓝方雷达）
+# ★ aim_at nearest 读本机航迹表；表由自载 EW_RADAR 经 TRACK_MANAGER 供给
+# ★ beam_width_deg 0：不启用连续方向图，主瓣筛不参与（与 comm_track_jam 同）
+platform_type EW_ATTACKER
+    side red
+    radar_cross_section 10 m2
+    component mover AIR_MEDIUM
+    end_component
+    component sensor EW_RADAR
+    end_component
+    component track TRACK_MANAGER
+    end_component
+    component jammer RF_JAMMER
+        peak_power       100 kW
+        frequency        4 GHz
+        antenna_gain_db  30
+        aim_at           nearest
+    end_component
+end_platform_type
+
+# ---- 地空导弹（SAM 制导：垂直发射→程序转弯→定高巡航→末段双轴比例导引）----
+# ★ v0.13.67 新增 SAM_GUIDANCE（guidance/sam.py）：弹道式的中段是自由飞，
+#   对空中目标会从目标头顶掠过去（第一轮实测中空 2/6、高空 0/2，gap G2）。
+#   radial_accel 200（20 g）是这张表要的——120 以下时近距低空目标压不下来。
+component_type MISSILE_MOVER
+end_component_type
+
+component_type SAM_BODY : MISSILE_MOVER
+    mass             600 kg
+    fuel_mass        400 kg
+    thrust           66 kN
+    specific_impulse 250 s
+    drag_area        0.09 m2
+    radial_accel     200 m/s2
+    max_speed        1500 m/s
+    launch_fpa       85 deg
+    period           0.1 s
+end_component_type
+
+platform_type SAM_MISSILE
+    side blue
+    component mover SAM_BODY
+    end_component
+    component guidance SAM_GUIDANCE
+        lethal_radius 50 m
+    end_component
+    component damage WARHEAD
+        fuse_radius 150 m
+    end_component
+end_platform_type
+
+# ---- 战区 ----
+zone GROWLER_SECTOR
+    anchor     39.9042 116.4074
+    radius     90 km
+    resolution 500 m
+    layers     1
+    terrain    flat
+end_zone
+
+# ---- 实例 ----
+# 蓝方 SAM 阵地（战区锚点）
+platform SAM_1 SAM_SITE
+    position latlng 39.9042 116.4074
+end_platform
+
+# 红方干扰机 ×2：阵地以南 ~60 km 进场（向北，heading 0）
+platform JAM_1 EW_ATTACKER
+    position latlng 39.3642 116.4074
+    heading  0 deg
+end_platform
+platform JAM_2 EW_ATTACKER
+    position latlng 39.3800 116.4200
+    heading  0 deg
+end_platform

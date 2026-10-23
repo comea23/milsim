@@ -1,0 +1,72 @@
+[
+ {
+  "src": "asm",
+  "tag": "climb",
+  "t_s": 67.0,
+  "range_m": 37182.2,
+  "alt_m": 130.1,
+  "vz_mps": -1.71,
+  "closing_mps": 172.68,
+  "track_age_s": 2.0
+ },
+ {
+  "src": "asm",
+  "tag": "cruise",
+  "t_s": 180.0,
+  "range_m": 25817.3,
+  "alt_m": 76.7,
+  "vz_mps": -0.05,
+  "closing_mps": -3.34,
+  "track_age_s": 2.0
+ },
+ {
+  "src": "asm",
+  "tag": "term",
+  "t_s": 382.0,
+  "range_m": 16176.9,
+  "alt_m": 75.0,
+  "vz_mps": -0.0,
+  "closing_mps": 240.0,
+  "track_age_s": 2.0
+ },
+ {
+  "src": "asm",
+  "tag": "past",
+  "t_s": 450.0,
+  "range_m": 17.6,
+  "alt_m": 672.3,
+  "vz_mps": -53.48,
+  "closing_mps": 247.43,
+  "track_age_s": 2.0
+ },
+ {
+  "src": "transit",
+  "tag": "flat1",
+  "t_s": 20.0,
+  "range_m": 5900.0,
+  "alt_m": 3000.0,
+  "vz_mps": 0.0,
+  "closing_mps": 0.0,
+  "track_age_s": 2.0
+ },
+ {
+  "src": "transit",
+  "tag": "flat2",
+  "t_s": 60.0,
+  "range_m": 5900.0,
+  "alt_m": 3000.0,
+  "vz_mps": 0.0,
+  "closing_mps": 0.0,
+  "track_age_s": 4.0
+ },
+ {
+  "src": "transit",
+  "tag": "flat3",
+  "t_s": 100.0,
+  "range_m": 5900.0,
+  "alt_m": 3000.0,
+  "vz_mps": 0.0,
+  "closing_mps": 0.0,
+  "track_age_s": 8.0
+ }
+]

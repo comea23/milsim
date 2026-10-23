@@ -1,0 +1,65 @@
+# 生成：tools/cmp_sensors.py · a10000_v250_r1p0
+simulation
+    name     "cmp sensors a10000_v250_r1p0"
+    max_step 0.5 s
+    seed     20261017
+end_simulation
+
+zone CMP_AREA
+    anchor     30.0 120.0
+    radius     150 km
+    resolution 1 km
+    layers     1
+    terrain    flat
+end_zone
+
+component_type AIR_MOVER
+end_component_type
+component_type CMP_BODY : AIR_MOVER
+    max_speed       250 m/s
+    turn_rate       120 deg/s
+    radial_accel    100 m/s2
+    linear_accel    20 m/s2
+    period          0.1 s
+end_component_type
+
+platform_type RADAR_NODE
+    side blue
+    component sensor HEX_SEARCH_RADAR
+        scan_interval              2 s
+        fov                        0 deg
+        beam_width                 2 deg
+        scan_center                180 deg
+        fov_el_min                 2 deg
+        fov_el_max                 80 deg
+        max_range                  300 km
+        detect_range               35427.442 m
+        required_pd                0.5
+        reference_rcs              0.1 m2
+        frequency                  3.3 GHz
+        bandwidth                  2 MHz
+        noise_power                6.726668104e-16 W
+        hits_to_establish          1
+        establish_window           1
+        swerling_case              0
+        probability_of_false_alarm 1e-6
+        ebs_loss_exponent          4
+    end_component
+end_platform_type
+
+platform_type INTRUDER
+    side red
+    radar_cross_section 1 m2
+    component mover CMP_BODY
+    end_component
+end_platform_type
+
+platform R_RADAR RADAR_NODE
+    position latlng 30.0 120.0
+    heading 0 deg
+end_platform
+
+platform TGT INTRUDER
+    position latlng 30.809388 120.000000
+    heading 180 deg
+end_platform

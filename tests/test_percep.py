@@ -954,6 +954,91 @@ def test_a_dead_target_forgets_its_track_state() -> None:
 
 
 # ===========================================================================
+# 第二层（续）：运行期辐射开关（v0.13.67，EMCON）
+# ===========================================================================
+
+
+def test_radar_off_stops_illuminating_until_turned_back_on() -> None:
+    """关机 = 停止照射：不推进扫掠、不建新航迹；已建航迹**冻结**（不撤）。
+
+    M/N 窗口按照射次数计（没有时间老化那一维），所以关机期间老航迹不会
+    因为"很久没更新"而消失——它一直挂在那，直到重新开机后再照到（或照不到）
+    它。这正是 EMCON 的物理：静默期不收回波，也不主动忘掉已经跟上的东西。
+    """
+    _ForcedPd.forced_pd = 1.0
+    radar, engine, store = _build(
+        cls=_ForcedPd,
+        entities=((1, *_EAST),),
+        scan_interval=_REV_PER_BEAT,
+        **_INSTANT_TRACK,
+    )
+    _run(engine, 3.0)
+    assert set(radar.contacts_seen) == {1}
+    assert len(radar.contacts_seen) == 3, "一圈 1 s、3 拍 ⇒ 照射 3 次、写入 3 次"
+    ticks_lit = radar.ticks
+
+    ok, why = radar.execute("off", {})
+    assert ok, why
+    for beat in (4.0, 5.0, 6.0, 7.0, 8.0):
+        engine.tick_to(beat)
+    assert radar.ticks == ticks_lit, "关机期间一拍都不该扫"
+    assert radar.view.my_contacts(), "已建航迹冻结，不是被撤掉"
+
+    # 静默期间新进场的目标：照不到 ⇒ 建不了航
+    frame = LocalFrame(0.0, 0.0, _SIZE)
+    cell = Axial(*_WEST)
+    store.add(2, LocalCellRef(1, 0, cell))
+    x, y = frame.to_world(cell)
+    store.set_pose(2, x, y, 0.0)
+    engine.tick_to(9.0)
+    engine.tick_to(10.0)
+    assert 2 not in radar.contacts_seen, "关机期间不该建新航迹"
+
+    ok, why = radar.execute("on", {})
+    assert ok, why
+    engine.tick_to(11.0)
+    assert radar.ticks == ticks_lit + 1
+    assert 2 in radar.contacts_seen, "重新开机第一拍就扫过整个静默期"
+
+
+def test_radar_can_start_dark() -> None:
+    """``emitting false`` = 出塞即静默；不开机就什么也探测不到。"""
+    _ForcedPd.forced_pd = 1.0
+    radar, engine, _ = _build(
+        cls=_ForcedPd,
+        entities=((1, *_EAST),),
+        scan_interval=_REV_PER_BEAT,
+        emitting=False,
+        **_INSTANT_TRACK,
+    )
+    _run(engine, 5.0)
+    assert radar.ticks == 0
+    assert radar.contacts_seen == []
+
+    ok, why = radar.execute("on", {})
+    assert ok, why
+    engine.tick_to(6.0)
+    assert radar.ticks == 1
+    assert radar.contacts_seen == [1]
+
+
+def test_radar_commands_report_unknown_ones() -> None:
+    """没声明过的指令整体拒绝——"不接受"与"执行失败"要分得清（§5.18）。"""
+    radar, _, _ = _build(cls=_ForcedPd, entities=((1, *_EAST),))
+    ok, why = radar.execute("fire", {})
+    assert not ok
+    assert "不接受指令" in why
+    ok, _ = radar.execute("on", {})
+    assert ok
+    ok, _ = radar.execute("on", {})
+    assert ok, "重复开机是幂等的，不该报错"
+    ok, _ = radar.execute("off", {})
+    assert ok
+    ok, _ = radar.execute("off", {})
+    assert ok, "重复关机同样是幂等的"
+
+
+# ===========================================================================
 # 第三层：通视的地表口径
 # ===========================================================================
 

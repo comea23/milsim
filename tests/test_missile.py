@@ -34,6 +34,7 @@ from milsim.models.guidance import (
     ASM_PHASES,
     BALLISTIC_PHASES,
     CRUISE_PHASES,
+    SAM_PHASES,
     GuidanceComputer,
 )
 from milsim.models.guidance.contract import (
@@ -41,6 +42,7 @@ from milsim.models.guidance.contract import (
     HORIZ_PN,
     HORIZ_ROUTE,
     HORIZ_TARGET,
+    VERT_ALTITUDE,
     VERT_BALANCE,
     VERT_FPA,
     VERT_FREE,
@@ -1101,10 +1103,11 @@ def test_guidance_is_a_component_with_contract_params() -> None:
 
 
 def test_missile_is_registered_under_its_type_name() -> None:
-    """注册表里认得出弹体与三个参考制导件。"""
+    """注册表里认得出弹体与四个参考制导件。"""
     factory = ComponentFactory()
     assert factory.resolve_class("MISSILE_MOVER") is MissileMover
-    for name in ("ASM_GUIDANCE", "CRUISE_GUIDANCE", "BALLISTIC_GUIDANCE"):
+    for name in ("ASM_GUIDANCE", "CRUISE_GUIDANCE", "BALLISTIC_GUIDANCE",
+                 "SAM_GUIDANCE"):
         assert issubclass(factory.resolve_class(name), GuidanceComputer)
 
 
@@ -1344,3 +1347,63 @@ def test_asm_missile_follows_route_then_hits() -> None:
         assert best <= bound, f"途径点 ({wx:g}, {wy:g}) 最近 {best:.0f} m"
         order.append(gaps.index(best))
     assert order[0] < order[1], "必须先过第一个点再过第二个点"
+
+
+# ===========================================================================
+# 地空弹（v0.13.67，SAM 阶段表）
+# ===========================================================================
+
+#: 地空弹的配套性能参数（与 ``guidance/sam.py`` 的模块头一致）。
+#: ``radial_accel 200``（20 g）是这张表**要的**，扫出来的：120 以下时
+#: 程序转弯段窜太高，近距低空目标（10~15 km×3 km）压不下来。
+SAM_BODY = {
+    "mass": 600.0,
+    "fuel_mass": 400.0,
+    "thrust": 66_000.0,
+    "specific_impulse": 250_000_000,
+    "drag_area": 0.09,
+    "radial_accel": 200.0,
+    "max_speed": 1500.0,
+    "launch_fpa": 85.0,
+}
+
+
+def test_sam_table_keeps_vertical_control_in_midcourse() -> None:
+    """地空表与弹道表的**唯一结构性差别**：中段有人管垂直（定高）。
+
+    弹道式中段是 ``VERT_FREE``（没人管垂直，弹靠重力拱起来）——对空中目标
+    那是错的：自由飞的弧线从目标头顶几十公里外掠过去（v0.13.66 用弹道式
+    凑合的那轮实测中空 2/6、高空 0/2）。
+    """
+    assert [p.name for p in SAM_PHASES] == [
+        "LIFTOFF", "PITCH_OVER", "CRUISE", "TERMINAL"
+    ]
+    assert SAM_PHASES[0].vertical == VERT_BALANCE      # 保持发射姿态
+    assert SAM_PHASES[1].vertical == VERT_FPA
+    assert SAM_PHASES[1].horizontal == HORIZ_TARGET    # 转身时就开始指目标
+    assert SAM_PHASES[2].vertical == VERT_ALTITUDE
+    assert SAM_PHASES[2].altitude == 8_000.0
+    assert SAM_PHASES[3].vertical == VERT_PN
+    assert SAM_PHASES[3].horizontal == HORIZ_PN
+    # 弹道式中段恰好在同一格上是"关掉制导"——两个表在这里分叉。
+    assert BALLISTIC_PHASES[2].vertical == VERT_FREE
+
+
+def test_sam_missile_intercepts_an_air_target() -> None:
+    """端到端：垂直发射 → 程序转弯 → 定高 → 末段，命中 30 km 外 8 km 高的目标。
+
+    横向偏 5 km 是**必须测的**：正北的目标上 ``λ̇_h`` 恒为 0，水平比例导引
+    那一环等于没接进去（与弹道弹包线表同一条纪律）。
+    """
+    from milsim.models.guidance import SamGuidance
+    from milsim.services.type_registry import ComponentFactory as _F
+
+    assert _F().resolve_class("SAM_GUIDANCE") is SamGuidance
+    for north, east in ((30_000.0, 0.0), (30_000.0, 5_000.0)):
+        rig = build(SAM_BODY, guidance_type="SAM_GUIDANCE",
+                    target=offset((0.0, 0.0, 8_000.0), north, east))
+        assert isinstance(rig.guidance, SamGuidance)
+        rig.fly(frames=12_000)
+        assert rig.guidance.hit(), f"({north:g}, {east:g}) 该命中"
+        names = [name for name, _t0, _t1 in rig.guidance.timeline()]
+        assert names == ["LIFTOFF", "PITCH_OVER", "CRUISE", "TERMINAL"], names

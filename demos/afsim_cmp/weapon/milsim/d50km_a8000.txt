@@ -1,0 +1,54 @@
+# 生成：tools/cmp_movers.py · asm · d50km_a8000
+simulation
+    name     "cmp d50km_a8000"
+    max_step 0.1 s
+    seed     20261017
+end_simulation
+
+zone CMP_AREA
+    anchor     39.05 -89.8
+    radius     120 km
+    resolution 1 km
+    layers     1
+    terrain    flat
+end_zone
+
+component_type MISSILE_MOVER
+end_component_type
+component_type CMP_BODY : MISSILE_MOVER
+    mass                519 kg
+    fuel_mass           200 kg
+    thrust              2900 N
+    specific_impulse    1478 s
+    drag_area           0.00923 m2
+    radial_accel        45 m/s2
+    max_speed           600 m/s
+    launch_speed        231.5 m/s
+    launch_fpa          0 deg
+    period              0.5 s
+end_component_type
+
+component_type ROUTE_ASM_GUIDANCE
+end_component_type
+platform_type ASM_TARGET
+    side red
+end_platform_type
+platform_type CMP_PLAT
+    side blue
+    component mover CMP_BODY
+    end_component
+    component guidance ROUTE_ASM_GUIDANCE
+        target_name   TGT_1
+        lethal_radius 100 m
+        route         25924.4 -5517.0 25997.6 -27756.0
+        waypoint_radius 2 km
+    end_component
+end_platform_type
+
+platform TGT_1 ASM_TARGET
+    position latlng 39.05000 -89.80000
+end_platform
+platform P1 CMP_PLAT
+    position latlng 39.43906 -89.50888
+    heading  330.00 deg
+end_platform

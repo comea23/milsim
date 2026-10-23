@@ -1,0 +1,90 @@
+# 生成：tools/cmp_sensors.py · a20000_v150_r0p1（功率偏移 -31.5 dB）
+end_time 603 sec
+
+radar_signature SIG_TGT
+   constant 0.1 m2
+end_radar_signature
+
+antenna_pattern LR_ANT
+   circular_pattern
+   peak_gain 40 db
+   beamwidth 2 deg
+   minimum_gain -30 db
+end_antenna_pattern
+
+script void detAttempt(WsfPlatform aPlatform, WsfSensor aSensor,
+                       WsfPlatform aTarget, WsfSensorInteraction aResult)
+   WsfGeoPoint p = aTarget.Location();
+   writeln("DET,", TIME_NOW, ",", aResult.SignalToNoise(), ",",
+           p.Latitude() - 30.0, ",", p.Longitude() - 120.0, ",",
+           p.Altitude());
+end_script
+
+observer
+   enable SENSOR_DETECTION_ATTEMPT detAttempt
+end_observer
+
+platform_type RADAR_SHIP WSF_PLATFORM
+   side blue
+   sensor s WSF_RADAR_SENSOR
+      frame_time                     2.0 sec
+      scan_mode                      azimuth_and_elevation
+      azimuth_scan_limits            -45 deg 45 deg
+      elevation_scan_limits          2.0 deg 80.0 deg
+      transmitter
+         antenna_pattern             LR_ANT
+         electronic_beam_steering both
+         electronic_beam_steering_loss_exponent 2.0
+         power                       4.234687e+03 W
+         frequency                   3.3 ghz
+      end_transmitter
+      receiver
+         antenna_pattern             LR_ANT
+         electronic_beam_steering both
+         electronic_beam_steering_loss_exponent 2.0
+         bandwidth                   2.0 mhz
+         noise_power                 -151.722 dBw
+      end_receiver
+      hits_to_establish_track        1 1
+      probability_of_false_alarm     1.0e-6
+      required_pd                    0.5
+      swerling_case                  0
+      reports_range
+      reports_bearing
+      reports_elevation
+      reports_location
+      on
+   end_sensor
+end_platform_type
+
+platform_type INTRUDER WSF_PLATFORM
+   side red
+   radar_signature SIG_TGT
+   mover WSF_KINEMATIC_MOVER
+   end_mover
+end_platform_type
+
+platform R RADAR_SHIP
+   position 30.00000n 120.00000e
+   heading 0 deg
+end_platform
+
+platform T INTRUDER
+   position 30.80939n 120.00000e altitude 20000 m msl
+   heading 180 deg
+   route
+      position 30.80939n 120.00000e altitude 20000 m speed 150 m/s
+      position 30.02248n 120.00000e altitude 20000 m speed 150 m/s
+   end_route
+      mover
+      initial_speed 150 m/s
+      target_speed 150 m/s
+      maximum_linear_acceleration 20 m/s2
+      maximum_radial_acceleration 100 m/s2
+      maximum_body_turn_rate 120 deg/sec
+      maximum_body_roll_rate 500 deg/sec
+      proportional_navigation_gain 10
+      velocity_pursuit_gain 30
+      update_interval 0.1 sec
+   end_mover
+end_platform
